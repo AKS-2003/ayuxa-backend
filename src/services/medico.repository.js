@@ -42,7 +42,7 @@ const findCaregiverByPhone = (phone) => medico.caregivers.findUnique({ where: { 
 const findCaregiverByEmail = (email) => medico.caregivers.findFirst({ where: { email } });
 
 /** Look up a medico caregiver by id. */
-const findCaregiverById = (id) => medico.caregivers.findUnique({ where: { id } });
+const findCaregiverById = (id) => medico.caregivers.findUnique({ where: { id }, include: { cities: { select: { name: true } } } });
 
 /** A patient's medico-side health reports (for display alongside Ayuxa's own records). */
 const listHealthReportsForUser = (userId) =>
@@ -81,6 +81,21 @@ const findBookingById = (id) => medico.bookings.findUnique({ where: { id } });
 /** Cities a new caregiver can be assigned to (defaults new signups to the first enabled city). */
 const listEnabledCities = () =>
     medico.cities.findMany({ where: { isEnabled: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } });
+
+/** Paginated/searchable medico patients (Users) — admin panel's Connect patient lookup. */
+const listUsers = ({ skip, take, search }) => {
+    const where = search
+        ? { OR: [{ name: { contains: search, mode: 'insensitive' } }, { phone: { contains: search } }, { uniqueUserId: { contains: search, mode: 'insensitive' } }] }
+        : {};
+    return medico.users.findMany({ where, skip, take, orderBy: { createdAt: 'desc' } });
+};
+
+const countUsers = (search) => {
+    const where = search
+        ? { OR: [{ name: { contains: search, mode: 'insensitive' } }, { phone: { contains: search } }, { uniqueUserId: { contains: search, mode: 'insensitive' } }] }
+        : {};
+    return medico.users.count({ where });
+};
 
 /**
  * The one sanctioned write into medico's schema: creates a brand-new
@@ -150,6 +165,8 @@ module.exports = {
     listBookingsForCaregiver,
     findBookingById,
     listEnabledCities,
+    listUsers,
+    countUsers,
     createCaregiver,
     updateCaregiverProfile,
     updateEmergencyContact,
