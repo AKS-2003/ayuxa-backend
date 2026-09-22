@@ -53,9 +53,16 @@ router.post('/caregiver/signup/verify-otp', signupOtpValidator, validate, ctrl.c
 router.post('/caregiver/verify-email/request-otp', otpLimiter, [emailValidator], validate, ctrl.caregiverVerifyEmailRequestOTP);
 router.post('/caregiver/verify-email/verify-otp', emailOtpValidator, validate, ctrl.caregiverVerifyEmailVerifyOTP);
 
-// ─── Ayuxa Connect: Family account OTP (self-registers) ────────
+// ─── Ayuxa Connect: Family account OTP (self-registers). mode covers
+// login_screen.dart's "My Mobile" vs "Emergency Contact" toggle — ayuxaId
+// (medico uniqueUserId) is required only for the emergency-contact mode. ──
+const familyOtpValidator = [
+    ...signupOtpValidator,
+    body('mode').isIn(['mobile', 'emergency']).withMessage('mode must be mobile or emergency'),
+    body('ayuxaId').if(body('mode').equals('emergency')).notEmpty().withMessage('Ayuxa ID is required for emergency contact login'),
+];
 router.post('/family/request-otp', otpLimiter, [phoneValidator], validate, ctrl.familyRequestOTP);
-router.post('/family/verify-otp', signupOtpValidator, validate, ctrl.familyVerifyOTP);
+router.post('/family/verify-otp', familyOtpValidator, validate, ctrl.familyVerifyOTP);
 router.post('/family/refresh', ctrl.familyRefreshToken);
 
 // ─── Shared ──────────────────────────────────

@@ -22,6 +22,13 @@ const otpService = require('../services/otp.service');
 const sessionService = require('../services/session.service');
 const medicoRepo = require('../services/medico.repository');
 
+/** Strips the session refresh token (and FCM device token) before embedding a CaregiverProfile in a login/signup response. */
+function sanitizeProfile(profile) {
+    if (!profile) return profile;
+    const { refreshToken, fcmDeviceToken, ...safe } = profile;
+    return safe;
+}
+
 const ACCESS_COOKIE_MAX_AGE = 3600000; // 1 hour
 const REFRESH_COOKIE_MAX_AGE = 30 * 24 * 3600000; // 30 days
 
@@ -171,7 +178,7 @@ const caregiverVerifyOTP = async (req, res, next) => {
             data: {
                 accessToken, refreshToken,
                 caregiver: { id: caregiver.id, name: caregiver.name, phone: caregiver.phone, email: caregiver.email },
-                profile,
+                profile: sanitizeProfile(profile),
             },
         });
     } catch (error) {
@@ -232,7 +239,7 @@ const caregiverSignupVerifyOTP = async (req, res, next) => {
             data: {
                 accessToken, refreshToken,
                 caregiver: { id: caregiver.id, name: caregiver.name, phone: caregiver.phone, email: caregiver.email },
-                profile,
+                profile: sanitizeProfile(profile),
             },
         });
     } catch (error) {
@@ -294,9 +301,18 @@ const caregiverRefreshToken = async (req, res, next) => {
 
 // ═══════════════════════════════════════════
 //  AYUXA CONNECT — Family account OTP login
+//  Mirrors login_screen.dart's two LoginModes:
+//    mobile    — family member's own number; if not yet linked to any
+//                patient, the app separately calls POST /api/connect/me/patients
+//                (see connect.controller.js linkPatient) after this.
+//    emergency — family member's own number, which must already be a
+//                registered emergency contact for the patient identified
+//                by ayuxaId (medico User.uniqueUserId) — verify-otp links
+//                them immediately, matching otp_verify_screen.dart's
+//                inline validation (no separate Link screen for this mode).
 // ═══════════════════════════════════════════
 
-/** POST /api/auth/family/request-otp */
+/** POST /api/auth/family/request-otp  body: { phoneNumber } */
 const familyRequestOTP = async (req, res, next) => {
     try {
         const { phoneNumber } = req.body;
@@ -308,10 +324,10 @@ const familyRequestOTP = async (req, res, next) => {
     }
 };
 
-/** POST /api/auth/family/verify-otp */
+/** POST /api/auth/family/verify-otp  body: { phoneNumber, otp, mode, ayuxaId? } */
 const familyVerifyOTP = async (req, res, next) => {
     try {
-        const { phoneNumber, otp } = req.body;
+        const { phoneNumber, otp, mode, ayuxaId } = req.body;
 
         const verification = await otpService.verifyOTP(phoneNumber, otp);
         if (!verification.success) return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
@@ -320,6 +336,26 @@ const familyVerifyOTP = async (req, res, next) => {
         const isNewAccount = !account;
         if (isNewAccount) {
             account = await prisma.familyAccount.create({ data: { phone: phoneNumber } });
+        }
+
+        let linkedPatient = null;
+        if (mode === 'emergency') {
+            if (!ayuxaId) return res.status(422).json({ success: false, message: 'Ayuxa ID is required for emergency contact login' });
+
+            const patient = await medicoRepo.findUserByUniqueUserId(ayuxaId);
+            if (!patient) return res.status(404).json({ success: false, message: 'No patient found with that Ayuxa ID' });
+
+            const isEmergencyContact = await medicoRepo.isEmergencyContactForUser(patient.id, phoneNumber);
+            if (!isEmergencyContact) {
+                return res.status(403).json({ success: false, message: 'This number is not a registered emergency contact for that patient' });
+            }
+
+            const link = await prisma.familyPatientLink.upsert({
+                where: { accountId_patientUserId: { accountId: account.id, patientUserId: patient.id } },
+                update: {},
+                create: { accountId: account.id, patientUserId: patient.id, relation: 'Emergency Contact' },
+            });
+            linkedPatient = { link, patient: { id: patient.id, name: patient.name, uniqueUserId: patient.uniqueUserId } };
         }
 
         const session = await sessionService.recordFamilyAccountSession(account.id, req);
@@ -332,7 +368,11 @@ const familyVerifyOTP = async (req, res, next) => {
 
         res.json({
             success: true,
-            data: { isNewAccount, accessToken, refreshToken, account: { id: account.id, name: account.name, phone: account.phone } },
+            data: {
+                isNewAccount, accessToken, refreshToken,
+                account: { id: account.id, name: account.name, phone: account.phone },
+                linkedPatient,
+            },
         });
     } catch (error) {
         next(error);

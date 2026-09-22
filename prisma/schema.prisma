@@ -235,6 +235,7 @@ model FamilyAccount {
 
   links          FamilyPatientLink[]
   sessions       FamilyAccountSession[]
+  notifications  ConnectNotification[]
 
   @@map("family_accounts")
 }
@@ -299,6 +300,41 @@ model ServiceVisit {
 
   @@index([patientUserId])
   @@map("ayuxa_service_visits")
+}
+
+// Document uploads for family_documents_screen.dart's two tabs
+// ("Ayuxa Documents" / "Client & Family Documents"), keyed by `source`.
+model ConnectUpload {
+  id            String   @id @default(uuid())
+  patientUserId String   // medico User.id
+  uploadedByAccountId String? // FamilyAccount.id, when uploaded from Connect (source = FAMILY)
+  fileName      String
+  fileUrl       String?
+  category      String
+  source        String   @default("FAMILY") // AYUXA | FAMILY
+  uploadedBy    String   @default("")
+  uploadedAt    DateTime @default(now())
+
+  @@index([patientUserId])
+  @@map("connect_uploads")
+}
+
+// family_notifications_screen.dart's notification feed — one per
+// FamilyAccount (not per-patient: a family member sees all updates
+// across every patient they're linked to in a single feed).
+model ConnectNotification {
+  id        String        @id @default(uuid())
+  accountId String
+  title     String
+  body      String
+  category  String
+  read      Boolean       @default(false)
+  createdAt DateTime      @default(now())
+
+  account   FamilyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, read])
+  @@map("connect_notifications")
 }
 
 // ─── Shared ──────────────────────────────────

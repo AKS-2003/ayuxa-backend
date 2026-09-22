@@ -9,6 +9,13 @@ const prisma = require('../config/database');
 const medicoRepo = require('../services/medico.repository');
 const { generateEmployeeId } = require('../utils/helpers');
 
+/** Strips the session refresh token (and FCM device token) before exposing a CaregiverProfile to its own client. */
+function sanitizeProfile(profile) {
+    if (!profile) return profile;
+    const { refreshToken, fcmDeviceToken, ...safe } = profile;
+    return safe;
+}
+
 /** GET /api/buddy/me */
 const getMe = async (req, res, next) => {
     try {
@@ -24,7 +31,7 @@ const getMe = async (req, res, next) => {
             medicoRepo.listBookingsForCaregiver(req.caregiver.id),
         ]);
 
-        res.json({ success: true, data: { caregiver: req.caregiver, profile, bookings } });
+        res.json({ success: true, data: { caregiver: req.caregiver, profile: sanitizeProfile(profile), bookings } });
     } catch (error) {
         next(error);
     }
@@ -70,7 +77,7 @@ const updateMe = async (req, res, next) => {
         });
 
         const caregiver = await medicoRepo.findCaregiverById(req.caregiver.id);
-        res.json({ success: true, data: { caregiver, profile } });
+        res.json({ success: true, data: { caregiver, profile: sanitizeProfile(profile) } });
     } catch (error) {
         next(error);
     }
@@ -83,7 +90,7 @@ const submitKyc = async (req, res, next) => {
             where: { id: req.caregiverProfile.id },
             data: { kycStatus: 'PENDING_VERIFICATION' },
         });
-        res.json({ success: true, data: profile });
+        res.json({ success: true, data: sanitizeProfile(profile) });
     } catch (error) {
         next(error);
     }
@@ -105,7 +112,7 @@ const uploadPcc = async (req, res, next) => {
                 channels: ['push', 'email'],
             },
         });
-        res.json({ success: true, data: profile });
+        res.json({ success: true, data: sanitizeProfile(profile) });
     } catch (error) {
         next(error);
     }
@@ -127,7 +134,7 @@ const acceptAgreement = async (req, res, next) => {
                 channels: ['email', 'sms'],
             },
         });
-        res.json({ success: true, data: profile });
+        res.json({ success: true, data: sanitizeProfile(profile) });
     } catch (error) {
         next(error);
     }
@@ -276,7 +283,7 @@ const setKycStatus = async (req, res, next) => {
         if (status === 'ACCEPTED' && !profile.employeeId) data.employeeId = generateEmployeeId();
 
         const updated = await prisma.caregiverProfile.update({ where: { id: profile.id }, data });
-        res.json({ success: true, data: updated });
+        res.json({ success: true, data: sanitizeProfile(updated) });
     } catch (error) {
         next(error);
     }

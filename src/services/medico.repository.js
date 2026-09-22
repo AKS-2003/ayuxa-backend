@@ -18,6 +18,23 @@ const findUserByPhone = (phone) => medico.users.findUnique({ where: { phone } })
 /** Look up a medico patient (User) by id. */
 const findUserById = (id) => medico.users.findUnique({ where: { id } });
 
+/**
+ * Look up a medico patient (User) by their public "Ayuxa ID"
+ * (medico's uniqueUserId, e.g. MED-BLR-00001) — used by Ayuxa Connect's
+ * family-linking flows.
+ */
+const findUserByUniqueUserId = (uniqueUserId) => medico.users.findUnique({ where: { uniqueUserId } });
+
+/**
+ * True if `phone` is a registered emergency contact for the given patient
+ * (a patient can have multiple emergency contacts) — used by Ayuxa
+ * Connect's "Emergency Contact" login mode.
+ */
+const isEmergencyContactForUser = async (userId, phone) => {
+    const match = await medico.emergency_contacts.findFirst({ where: { userId, phone } });
+    return !!match;
+};
+
 /** Look up a medico caregiver by phone — used for Buddy login. */
 const findCaregiverByPhone = (phone) => medico.caregivers.findUnique({ where: { phone } });
 
@@ -34,6 +51,22 @@ const listHealthReportsForUser = (userId) =>
 /** A patient's medico-side emergency contacts. */
 const listEmergencyContactsForUser = (userId) =>
     medico.emergency_contacts.findMany({ where: { userId } });
+
+/**
+ * A patient's active/most-recent subscriptions with plan details — read
+ * only (see connect.controller.js: family accounts can't authenticate as
+ * the patient in medico, so real payment actions aren't proxied here).
+ */
+const listSubscriptionsForUser = (userId) =>
+    medico.subscriptions.findMany({
+        where: { userId },
+        include: { plans_subscriptions_planIdToplans: true },
+        orderBy: { createdAt: 'desc' },
+    });
+
+/** A patient's payment history — read only, same reasoning as above. */
+const listPaymentsForUser = (userId) =>
+    medico.payments.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
 
 /** A caregiver's medico-side bookings — used to seed Buddy check-in screens. */
 const listBookingsForCaregiver = (caregiverId) =>
@@ -80,17 +113,44 @@ const updateCaregiverProfile = (id, { name, email, specialization }) =>
         },
     });
 
+/**
+ * Updates name+phone on an existing emergency_contacts row for a patient —
+ * emergency_contact_card.dart's edit action. `id` has no compound unique
+ * with `userId` in medico's schema, so ownership is verified with a fetch
+ * first — the caller (connect.controller.js) must never skip this check,
+ * since it's what stops a family account from editing a contact on a
+ * patient it isn't linked to.
+ */
+const updateEmergencyContact = async (userId, contactId, { name, phone }) => {
+    const existing = await medico.emergency_contacts.findUnique({ where: { id: contactId } });
+    if (!existing || existing.userId !== userId) return null;
+
+    return medico.emergency_contacts.update({
+        where: { id: contactId },
+        data: {
+            ...(name !== undefined && { name }),
+            ...(phone !== undefined && { phone }),
+            updatedAt: new Date(),
+        },
+    });
+};
+
 module.exports = {
     findUserByPhone,
     findUserById,
+    findUserByUniqueUserId,
+    isEmergencyContactForUser,
     findCaregiverByPhone,
     findCaregiverByEmail,
     findCaregiverById,
     listHealthReportsForUser,
     listEmergencyContactsForUser,
+    listSubscriptionsForUser,
+    listPaymentsForUser,
     listBookingsForCaregiver,
     findBookingById,
     listEnabledCities,
     createCaregiver,
     updateCaregiverProfile,
+    updateEmergencyContact,
 };
