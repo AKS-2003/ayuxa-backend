@@ -1,0 +1,1351 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/.prisma/medico-readonly-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model activity_updates {
+  id            String      @id
+  lab_order_id  String?
+  eventType     String
+  serviceType   String
+  staffName     String
+  staffId       String
+  staffPhone    String
+  staffPhotoUrl String?
+  eta           String?
+  statusDetail  String?
+  createdAt     DateTime    @default(now())
+  lab_orders    lab_orders? @relation(fields: [lab_order_id], references: [id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model addresses {
+  id           String   @id
+  userId       String
+  label        String   @default("Home")
+  line1        String
+  line2        String?
+  cityName     String
+  state        String
+  pincode      String
+  landmark     String?
+  latitude     Float?
+  longitude    Float?
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  country      String   @default("India")
+  fullName     String?
+  phone        String?
+  users        users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model admin_sessions {
+  id           String   @id
+  adminId      String
+  deviceId     String?
+  deviceType   String   @default("PC")
+  browser      String?
+  os           String?
+  ipAddress    String?
+  city         String?
+  state        String?  @default("Delhi")
+  isActive     Boolean  @default(true)
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  admins       admins   @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, isActive])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model admins {
+  id                        String                      @id
+  name                      String
+  email                     String                      @unique
+  phone                     String?
+  passwordHash              String
+  role                      AdminRole                   @default(CITY_ADMIN)
+  cityId                    String?
+  isActive                  Boolean                     @default(true)
+  lastLoginAt               DateTime?
+  refreshToken              String?
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime
+  documentsJson             Json?
+  profileImageUrl           String?
+  isStaffProfile            Boolean                     @default(false)
+  admin_sessions            admin_sessions[]
+  cities                    cities?                     @relation(fields: [cityId], references: [id])
+  audit_logs                audit_logs[]
+  medical_tourism_enquiries medical_tourism_enquiries[]
+
+  @@index([name, email, role, isActive])
+}
+
+model app_message_dismissals {
+  id                 String       @id
+  user_id            String
+  app_message_id     String
+  message_version    String       @db.VarChar(20)
+  status             String       @default("VIEWED") @db.VarChar(20)
+  first_dismissed_at DateTime     @default(now())
+  updated_at         DateTime
+  app_messages       app_messages @relation(fields: [app_message_id], references: [id], onDelete: Cascade)
+  users              users        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, app_message_id, message_version], map: "app_message_dismissals_user_id_app_message_id_message_ver_key")
+}
+
+model app_messages {
+  id                     String                   @id
+  title                  String                   @db.VarChar(80)
+  body                   String
+  type                   String                   @default("ANNOUNCEMENT") @db.VarChar(20)
+  isActive               Boolean                  @default(false)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  requiresAgreement      Boolean                  @default(false)
+  version                String                   @default("1") @db.VarChar(20)
+  imageUrl               String?
+  target_city_id         String?
+  starts_at              DateTime?
+  ends_at                DateTime?
+  app_message_dismissals app_message_dismissals[]
+  cities                 cities?                  @relation(fields: [target_city_id], references: [id])
+
+  @@index([isActive])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model audit_logs {
+  id        String   @id
+  adminId   String?
+  action    String
+  entity    String
+  entityId  String?
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  admins    admins?  @relation(fields: [adminId], references: [id])
+
+  @@index([adminId])
+  @@index([entity, entityId])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model banners {
+  id         String   @id
+  imageUrl   String
+  heading    String   @db.VarChar(60)
+  subheading String   @db.VarChar(80)
+  ctaText    String?  @db.VarChar(30)
+  ctaRoute   String?  @db.VarChar(100)
+  order      Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+  category   String   @default("HOME") @db.VarChar(20)
+
+  @@index([isActive, order])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model bookings {
+  id                        String                     @id
+  bookingCode               String                     @unique
+  userId                    String
+  serviceId                 String
+  cityId                    String
+  caregiverId               String?
+  scheduledDate             DateTime
+  scheduledTime             String?
+  addressLine               String?
+  latitude                  Float?
+  longitude                 Float?
+  symptoms                  String[]
+  doctorType                String?
+  prescriptionUrl           String?
+  staffType                 String?
+  shiftDuration             ShiftDuration?
+  startDate                 DateTime?
+  endDate                   DateTime?
+  requirements              String[]
+  pickupAddress             String?
+  dropAddress               String?
+  vehicleType               String?
+  amount                    Float                      @default(0)
+  status                    BookingStatus              @default(PENDING)
+  adminNotes                String?
+  isEscalated               Boolean                    @default(false)
+  isSLABreached             Boolean                    @default(false)
+  slaDeadline               DateTime?
+  formDataJson              Json?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime
+  paymentStatus             PaymentStatus              @default(PENDING)
+  servicePersonName         String?
+  servicePersonNotes        String?
+  servicePersonPhone        String?
+  service_fee               Float                      @default(0)
+  ayuxa_booking_fee         Float                      @default(0)
+  delivery_fee              Float                      @default(0)
+  tax_amount                Float                      @default(0)
+  fee_breakdown             Json?
+  caregivers                caregivers?                @relation(fields: [caregiverId], references: [id])
+  cities                    cities                     @relation(fields: [cityId], references: [id])
+  services                  services                   @relation(fields: [serviceId], references: [id])
+  users                     users                      @relation(fields: [userId], references: [id])
+  lab_orders                lab_orders[]
+  medical_tourism_enquiries medical_tourism_enquiries?
+  payments                  payments[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model caregivers {
+  id                 String                @id
+  name               String
+  phone              String                @unique
+  email              String?
+  specialization     String?
+  qualification      String?
+  profileImageUrl    String?
+  documentsJson      Json?
+  cityId             String
+  policeVerification CaregiverVerification @default(PENDING)
+  isAvailable        Boolean               @default(true)
+  shiftType          CaregiverShift        @default(FLEXIBLE)
+  performanceRating  Float                 @default(0)
+  totalBookings      Int                   @default(0)
+  salary             Float                 @default(0)
+  payoutNotes        String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime
+  bookings           bookings[]
+  cities             cities                @relation(fields: [cityId], references: [id])
+  sos_alerts         sos_alerts[]
+
+  @@index([name, phone, specialization, policeVerification, isAvailable])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model categories {
+  id        String     @id
+  name      String     @unique
+  slug      String     @unique
+  imageUrl  String?
+  sortOrder Int        @default(0)
+  isEnabled Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime
+  products  products[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model cities {
+  id                String              @id
+  name              String              @unique
+  code              String              @unique
+  stateCode         String
+  isEnabled         Boolean             @default(true)
+  isComingSoon      Boolean             @default(false)
+  sequence          Int                 @default(0)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime
+  admins            admins[]
+  app_messages      app_messages[]
+  bookings          bookings[]
+  caregivers        caregivers[]
+  notification_logs notification_logs[]
+  sos_alerts        sos_alerts[]
+  users             users[]
+}
+
+model coupon_redemptions {
+  id        String   @id
+  couponId  String
+  userId    String
+  paymentId String   @unique
+  discount  Float    @default(0)
+  createdAt DateTime @default(now())
+  coupons   coupons  @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  users     users    @relation(fields: [userId], references: [id])
+
+  @@index([couponId, userId])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model coupons {
+  id                 String               @id
+  code               String               @unique
+  description        String?
+  discountType       String               @default("percentage")
+  discountValue      Float                @default(0)
+  maxDiscount        Float?
+  minOrderValue      Float?
+  usageLimit         Int?
+  usedCount          Int                  @default(0)
+  isActive           Boolean              @default(true)
+  validFrom          DateTime             @default(now())
+  validUntil         DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime
+  perUserLimit       Int?
+  reservedForUserId  String?
+  coupon_redemptions coupon_redemptions[]
+
+  @@index([reservedForUserId])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model emergency_contacts {
+  id           String   @id
+  userId       String
+  name         String
+  phone        String
+  relationship String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+  users        users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model family_members {
+  id                String    @id
+  userId            String
+  name              String
+  relation          String
+  gender            String?
+  dateOfBirth       DateTime?
+  bloodGroup        String?
+  allergies         String?
+  chronicConditions String?
+  emergencyNotes    String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime
+  users             users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model faqs {
+  id        String   @id
+  question  String   @db.VarChar(300)
+  answer    String
+  category  String   @default("GENERAL") @db.VarChar(30)
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([isActive, order])
+}
+
+model featured_lab_packages {
+  id        String   @id
+  code      String   @unique
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  addedById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@index([isActive, sortOrder])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model health_reports {
+  id                String    @id
+  userId            String
+  title             String
+  fileUrl           String
+  fileType          String
+  uploadedBy        String    @default("user")
+  flagSeverity      String?
+  flagNote          String?
+  reportDate        DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime
+  ocrFlags          Json?
+  ocrHealthTags     String[]  @default([])
+  ocrParsedValues   Json?
+  ocrProcessedAt    DateTime?
+  ocrRawText        String?
+  ocrStatus         String    @default("pending")
+  category          String?   @default("Other")
+  suggestedAllergen String?
+  users             users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model insurance_applications {
+  id                    String             @id
+  userId                String
+  planName              String
+  applicantName         String
+  applicantAge          Int
+  applicantGender       String
+  preExistingConditions String[]
+  documentsJson         Json?
+  premium               Float              @default(0)
+  status                InsuranceAppStatus @default(DRAFT)
+  reviewNotes           String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime
+  users                 users              @relation(fields: [userId], references: [id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model invoices {
+  id                String    @id
+  paymentId         String    @unique
+  invoiceNumber     String    @unique
+  invoiceDate       DateTime  @default(now())
+  subtotal          Float
+  gstRate           Float     @default(18)
+  gstAmount         Float
+  totalAmount       Float
+  pdfUrl            String?
+  emailSentAt       DateTime?
+  billingName       String?
+  billingAddress    String?
+  billingGstin      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime
+  lineItemGst       Json?
+  service_fee       Float     @default(0)
+  ayuxa_booking_fee Float     @default(0)
+  delivery_fee      Float     @default(0)
+  pdf_storage_path  String?
+  payments          payments  @relation(fields: [paymentId], references: [id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model lab_orders {
+  id                 String             @id
+  userId             String
+  bookingId          String?
+  redcliffeBookingId String?            @unique
+  clientRefId        String             @unique
+  status             LabStatus          @default(PENDING)
+  bookingType        LabBookingType
+  patient            Json?
+  additionalMembers  Json?
+  address            Json?
+  packages           Json?
+  slot               Json?
+  paymentDetails     Json?
+  holdExpiresAt      DateTime?
+  trackingLink       String?
+  reportUrl          String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime
+  processedEvents    String[]           @default([])
+  assignedStaff      Json?
+  rescheduleReason   String?
+  rescheduledAt      DateTime?
+  rescheduledBy      String?
+  rescheduledDate    DateTime?
+  rescheduledTime    String?
+  service_fee        Float              @default(0)
+  ayuxa_booking_fee  Float              @default(0)
+  delivery_fee       Float              @default(0)
+  tax_amount         Float              @default(0)
+  activity_updates   activity_updates[]
+  bookings           bookings?          @relation(fields: [bookingId], references: [id])
+  users              users              @relation(fields: [userId], references: [id])
+  payments           payments[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model legal_documents {
+  id          String         @id
+  type        String
+  title       String
+  content     String
+  version     Int            @default(1)
+  status      LegalDocStatus @default(DRAFT)
+  publishedAt DateTime?
+  editedBy    String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model media_assets {
+  id         String   @id
+  fileName   String
+  fileUrl    String
+  fileType   String
+  fileSize   Int      @default(0)
+  folder     String   @default("general")
+  altText    String?
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model medical_cards {
+  id                 String   @id
+  userId             String
+  bloodGroup         String?
+  allergies          String[]
+  chronicConditions  String[]
+  currentMedications String[]
+  lastUpdated        DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime
+  primaryDoctor      String?
+  insuranceInfo      String?
+  users              users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model medical_tourism_enquiries {
+  id                    String               @id
+  bookingId             String               @unique
+  status                MedicalTourismStatus @default(NEW)
+  assignedCoordinatorId String?
+  internalNotes         String?
+  followUpDate          DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime
+  admins                admins?              @relation(fields: [assignedCoordinatorId], references: [id])
+  bookings              bookings             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model meetup_registrations {
+  id                  String                   @id
+  meetupId            String
+  userId              String
+  bookingCode         String                   @unique
+  fullName            String
+  mobile              String
+  age                 Int
+  gender              String
+  assistanceJson      Json?
+  specialNotes        String?
+  pickupEnabled       Boolean                  @default(false)
+  pickupAddress       String?
+  pickupLandmark      String?
+  pickupContact       String?
+  preferredPickupTime String?
+  status              MeetupRegistrationStatus @default(CONFIRMED)
+  paymentStatus       String                   @default("PAID")
+  amountPaid          Float                    @default(299)
+  razorpayOrderId     String?
+  razorpayPaymentId   String?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime
+  meetups             meetups                  @relation(fields: [meetupId], references: [id])
+  users               users                    @relation(fields: [userId], references: [id])
+
+  @@index([meetupId])
+  @@index([userId])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model meetups {
+  id                   String                 @id
+  title                String
+  description          String?
+  venue                String
+  venueAddress         String?
+  city                 String
+  pinCode              String?
+  eventDate            DateTime
+  startTime            String
+  endTime              String?
+  capacity             Int                    @default(50)
+  serviceCharge        Float                  @default(299)
+  isActive             Boolean                @default(true)
+  isFeatured           Boolean                @default(false)
+  organizerName        String?
+  organizerContact     String?
+  includedItems        String[]               @default([])
+  extraCharges         String[]               @default([])
+  imageUrl             String?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime
+  meetup_registrations meetup_registrations[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model notification_logs {
+  id            String              @id
+  channel       NotificationChannel
+  recipientId   String?
+  recipientType String              @default("user")
+  templateId    String?
+  subject       String?
+  body          String?
+  metadata      Json?
+  cityId        String?
+  isSent        Boolean             @default(false)
+  sentAt        DateTime?
+  errorMessage  String?
+  createdAt     DateTime            @default(now())
+  isRead        Boolean             @default(false)
+  readAt        DateTime?
+  cities        cities?             @relation(fields: [cityId], references: [id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model notification_templates {
+  id           String              @id
+  name         String
+  channel      NotificationChannel
+  subject      String?
+  bodyTemplate String
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model otp_logs {
+  id          String   @id
+  phoneNumber String
+  code        String
+  isUsed      Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model payments {
+  id                String          @id
+  userId            String
+  bookingId         String?
+  subscriptionId    String?
+  amount            Float
+  currency          String          @default("INR")
+  paymentMethod     PaymentMethod?
+  couponCode        String?
+  discountAmount    Float           @default(0)
+  razorpayOrderId   String?         @unique
+  razorpayPaymentId String?         @unique
+  razorpaySignature String?
+  status            PaymentStatus   @default(INITIATED)
+  refundId          String?
+  refundType        RefundType?
+  refundReason      String?
+  refundAmount      Float?
+  refundedAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime
+  productOrderId    String?
+  labOrderId        String?
+  invoices          invoices?
+  bookings          bookings?       @relation(fields: [bookingId], references: [id])
+  lab_orders        lab_orders?     @relation(fields: [labOrderId], references: [id])
+  product_orders    product_orders? @relation(fields: [productOrderId], references: [id])
+  subscriptions     subscriptions?  @relation(fields: [subscriptionId], references: [id])
+  users             users           @relation(fields: [userId], references: [id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plan_benefits {
+  id              String   @id
+  planId          String
+  serviceCategory String   @default("")
+  freeCount       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime
+  benefitCode     String   @default("")
+  description     String?
+  displayOrder    Int      @default(0)
+  title           String   @default("")
+  usageLimit      Int      @default(0)
+  usagePeriod     String   @default("MONTH")
+  plans           plans    @relation(fields: [planId], references: [id], onDelete: Cascade)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plan_billing_cycles {
+  id                 String          @id
+  planId             String
+  durationMonths     Int
+  price              Float
+  discountPercentage Int             @default(0)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime
+  plans              plans           @relation(fields: [planId], references: [id], onDelete: Cascade)
+  subscriptions      subscriptions[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plans {
+  id                                                                         String                         @id
+  name                                                                       String                         @unique
+  description                                                                String?
+  benefits                                                                   String?
+  quarterlyPrice                                                             Float                          @default(0)
+  biannualPrice                                                              Float                          @default(0)
+  yearlyPrice                                                                Float                          @default(0)
+  isVisible                                                                  Boolean                        @default(true)
+  sortOrder                                                                  Int                            @default(0)
+  createdAt                                                                  DateTime                       @default(now())
+  updatedAt                                                                  DateTime
+  planType                                                                   String                         @default("CARE")
+  tierLevel                                                                  Int                            @default(0)
+  maxConcurrent                                                              Int                            @default(1)
+  metadata                                                                   Json?
+  plan_benefits                                                              plan_benefits[]
+  plan_billing_cycles                                                        plan_billing_cycles[]
+  subscription_upgrade_history_subscription_upgrade_history_newPlanIdToplans subscription_upgrade_history[] @relation("subscription_upgrade_history_newPlanIdToplans")
+  subscription_upgrade_history_subscription_upgrade_history_oldPlanIdToplans subscription_upgrade_history[] @relation("subscription_upgrade_history_oldPlanIdToplans")
+  subscriptions_subscriptions_planIdToplans                                  subscriptions[]                @relation("subscriptions_planIdToplans")
+  subscriptions_subscriptions_scheduledPlanIdToplans                         subscriptions[]                @relation("subscriptions_scheduledPlanIdToplans")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model product_orders {
+  id                  String     @id
+  orderCode           String     @unique
+  userId              String
+  productId           String?
+  quantity            Int        @default(1)
+  amount              Float
+  status              String     @default("PENDING")
+  address             String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime
+  awbCode             String?
+  courierName         String?
+  shippingCharge      Float      @default(0)
+  shippingStatus      String     @default("PENDING")
+  trackingUrl         String?
+  discount            Float      @default(0)
+  items               Json?
+  shipmentId          String?
+  shiprocketOrderId   String?
+  subtotal            Float      @default(0)
+  tax                 Float      @default(0)
+  trackingData        Json?
+  trackingStatus      String?
+  fulfillmentError    String?
+  fulfillmentFailedAt DateTime?
+  service_fee         Float      @default(0)
+  ayuxa_booking_fee   Float      @default(0)
+  delivery_fee        Float      @default(0)
+  tax_amount          Float      @default(0)
+  payment_method      String     @default("PREPAID")
+  payments            payments[]
+  products            products?  @relation(fields: [productId], references: [id])
+  users               users      @relation(fields: [userId], references: [id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model products {
+  id               String             @id
+  name             String
+  description      String?
+  imageUrl         String?
+  price            Float              @default(0)
+  mrp              Float              @default(0)
+  stock            Int                @default(0)
+  isEnabled        Boolean            @default(true)
+  categoryId       String
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime
+  height           Float              @default(10)
+  images           String[]           @default([])
+  length           Float              @default(10)
+  sku              String?
+  weight           Float              @default(0.1)
+  width            Float              @default(10)
+  product_orders   product_orders[]
+  categories       categories         @relation(fields: [categoryId], references: [id])
+  waitlist_entries waitlist_entries[]
+}
+
+model referrals {
+  id                                String         @id
+  referrerId                        String
+  refereeId                         String         @unique
+  status                            ReferralStatus @default(PENDING)
+  codeUsed                          String
+  refereePaymentId                  String?
+  referrerCouponId                  String?
+  refereeCouponId                   String?
+  rewardValue                       Float          @default(0)
+  voidReason                        String?
+  createdAt                         DateTime       @default(now())
+  qualifiedAt                       DateTime?
+  rewardedAt                        DateTime?
+  users_referrals_refereeIdTousers  users          @relation("referrals_refereeIdTousers", fields: [refereeId], references: [id])
+  users_referrals_referrerIdTousers users          @relation("referrals_referrerIdTousers", fields: [referrerId], references: [id])
+
+  @@index([referrerId, status])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model saved_cards {
+  id             String   @id
+  userId         String
+  cardLast4      String
+  cardBrand      String
+  cardType       String   @default("CARD")
+  cardholderName String?
+  expiryMonth    String?
+  expiryYear     String?
+  upiId          String?
+  razorpayToken  String?
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  users          users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model service_categories {
+  id        String   @id
+  module    String
+  name      String
+  slug      String
+  imageUrl  String?
+  sortOrder Int      @default(0)
+  isEnabled Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+
+  @@unique([module, slug])
+  @@index([module, sortOrder])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model service_charges {
+  id                       String   @id
+  service_category         String   @unique
+  booking_fee              Float    @default(0)
+  platform_fee             Float    @default(0)
+  convenience_fee          Float    @default(0)
+  emergency_fee            Float    @default(0)
+  visit_fee                Float    @default(0)
+  night_charge             Float    @default(0)
+  surge_charge             Float    @default(0)
+  tax_percentage           Float    @default(0)
+  is_subscription_eligible Boolean  @default(true)
+  is_active                Boolean  @default(true)
+  created_at               DateTime @default(now())
+  updated_at               DateTime
+  service_fee              Float    @default(0)
+  base_price               Float?
+  pricing_text             String?
+  scope                    String   @default("SERVICE")
+  service_id               String?
+  is_request_based         Boolean  @default(false)
+  online_service_fee       Float?
+  offline_service_fee      Float?
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model services {
+  id             String      @id
+  name           String
+  slug           String      @unique
+  icon           String?
+  tagline        String?
+  description    String?
+  pricingText    String?
+  heroImageUrl   String?
+  route          String?
+  sortOrder      Int         @default(0)
+  isEnabled      Boolean     @default(true)
+  serviceType    ServiceType
+  formFieldsJson Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime
+  basePrice      Float?
+  checkoutGroup  String      @default("D")
+  headline       String?
+  subhead        String?
+  category       String?
+  isDynamic      Boolean     @default(false)
+  paymentMode    String      @default("INQUIRY")
+  categoryId     String?
+  bookings       bookings[]
+
+  @@index([categoryId])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model sos_alerts {
+  id              String      @id
+  userId          String
+  cityId          String
+  latitude        Float?
+  longitude       Float?
+  addressSnapshot String?
+  responderId     String?
+  status          SOSStatus   @default(ACTIVE)
+  resolvedAt      DateTime?
+  resolvedNotes   String?
+  adminNotified   Boolean     @default(false)
+  familyNotified  Boolean     @default(false)
+  callLogNotes    String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime
+  cities          cities      @relation(fields: [cityId], references: [id])
+  caregivers      caregivers? @relation(fields: [responderId], references: [id])
+  users           users       @relation(fields: [userId], references: [id])
+}
+
+model status_transition_logs {
+  id         String   @id
+  entityType String
+  entityId   String
+  fromStatus String?
+  toStatus   String
+  changedBy  String?
+  forced     Boolean  @default(false)
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model subscription_upgrade_history {
+  id                                                  String   @id
+  userId                                              String
+  oldPlanId                                           String
+  newPlanId                                           String
+  oldPlanName                                         String
+  newPlanName                                         String
+  oldPrice                                            Float
+  newPrice                                            Float
+  remainingDays                                       Int
+  creditApplied                                       Float    @default(0)
+  amountPaid                                          Float
+  type                                                String   @default("UPGRADE")
+  upgradeDate                                         DateTime @default(now())
+  createdAt                                           DateTime @default(now())
+  plans_subscription_upgrade_history_newPlanIdToplans plans    @relation("subscription_upgrade_history_newPlanIdToplans", fields: [newPlanId], references: [id])
+  plans_subscription_upgrade_history_oldPlanIdToplans plans    @relation("subscription_upgrade_history_oldPlanIdToplans", fields: [oldPlanId], references: [id])
+  users                                               users    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model subscription_usage {
+  id              String        @id
+  subscriptionId  String
+  serviceCategory String
+  totalAllocated  Int
+  usedCount       Int           @default(0)
+  lockedCount     Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime
+  subscriptions   subscriptions @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model subscriptions {
+  id                                         String               @id
+  userId                                     String
+  planId                                     String
+  billingCycle                               BillingCycle?
+  startDate                                  DateTime
+  expiryDate                                 DateTime
+  amount                                     Float                @default(0)
+  status                                     SubscriptionStatus   @default(ACTIVE)
+  autoRenew                                  Boolean              @default(false)
+  pausedAt                                   DateTime?
+  resumedAt                                  DateTime?
+  cancelledAt                                DateTime?
+  compassionateExtensionDays                 Int                  @default(0)
+  compassionateReason                        String?
+  createdAt                                  DateTime             @default(now())
+  updatedAt                                  DateTime
+  billingCycleId                             String?
+  creditApplied                              Float?
+  proRataCredit                              Float?
+  scheduledChangeDate                        DateTime?
+  scheduledPlanId                            String?
+  upgradeFromSubId                           String?
+  payments                                   payments[]
+  subscription_usage                         subscription_usage[]
+  plan_billing_cycles                        plan_billing_cycles? @relation(fields: [billingCycleId], references: [id], onDelete: Cascade)
+  plans_subscriptions_planIdToplans          plans                @relation("subscriptions_planIdToplans", fields: [planId], references: [id], onDelete: Cascade)
+  plans_subscriptions_scheduledPlanIdToplans plans?               @relation("subscriptions_scheduledPlanIdToplans", fields: [scheduledPlanId], references: [id])
+  users                                      users                @relation(fields: [userId], references: [id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model support_tickets {
+  id              String            @id
+  ticketCode      String            @unique
+  userId          String?
+  subject         String
+  description     String?
+  category        String?
+  priority        String            @default("medium")
+  status          String            @default("open")
+  assignedTo      String?
+  resolvedAt      DateTime?
+  resolutionNote  String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime
+  ticket_messages ticket_messages[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model ticket_messages {
+  id              String          @id
+  ticketId        String
+  senderId        String
+  senderType      String          @default("user")
+  message         String
+  attachments     Json?
+  createdAt       DateTime        @default(now())
+  support_tickets support_tickets @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+model ui_config_versions {
+  id          String    @id
+  configKey   String
+  configJson  Json
+  version     Int
+  publishedBy String?
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([configKey, createdAt])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model ui_configs {
+  id           String       @id
+  type         UIConfigType @default(CUSTOM)
+  key          String       @unique
+  label        String
+  iconUrl      String?
+  heroImageUrl String?
+  bannerColor  String?
+  ctaText      String?
+  ctaRoute     String?
+  configJson   Json?
+  sortOrder    Int          @default(0)
+  isVisible    Boolean      @default(true)
+  version      Int          @default(1)
+  publishedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime
+  draftJson    Json?
+  fetchCount   Int          @default(0)
+}
+
+model user_sessions {
+  id           String   @id
+  userId       String
+  deviceId     String?
+  deviceType   String   @default("Mobile")
+  browser      String?
+  os           String?
+  ipAddress    String?
+  city         String?
+  state        String?  @default("Delhi")
+  isActive     Boolean  @default(true)
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  users        users    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model users {
+  id                                    String                         @id
+  uniqueUserId                          String                         @unique
+  name                                  String
+  phone                                 String                         @unique
+  email                                 String?
+  gender                                String?
+  dateOfBirth                           DateTime?
+  profileImageUrl                       String?
+  preferredLanguage                     String                         @default("en")
+  healthTag                             HealthTag                      @default(NORMAL)
+  status                                UserStatus                     @default(ACTIVE)
+  cityId                                String
+  otpCode                               String?
+  otpExpiresAt                          DateTime?
+  refreshToken                          String?
+  createdAt                             DateTime                       @default(now())
+  updatedAt                             DateTime
+  fcmDeviceToken                        String?
+  emailMarketingEnabled                 Boolean                        @default(false)
+  pushEnabled                           Boolean                        @default(true)
+  smsEnabled                            Boolean                        @default(true)
+  whatsappEnabled                       Boolean                        @default(true)
+  deletedAt                             DateTime?
+  referralCode                          String?                        @unique
+  referredById                          String?
+  addresses                             addresses[]
+  app_message_dismissals                app_message_dismissals[]
+  bookings                              bookings[]
+  coupon_redemptions                    coupon_redemptions[]
+  emergency_contacts                    emergency_contacts[]
+  family_members                        family_members[]
+  health_reports                        health_reports[]
+  insurance_applications                insurance_applications[]
+  lab_orders                            lab_orders[]
+  medical_cards                         medical_cards[]
+  meetup_registrations                  meetup_registrations[]
+  payments                              payments[]
+  product_orders                        product_orders[]
+  referrals_referrals_refereeIdTousers  referrals?                     @relation("referrals_refereeIdTousers")
+  referrals_referrals_referrerIdTousers referrals[]                    @relation("referrals_referrerIdTousers")
+  saved_cards                           saved_cards[]
+  sos_alerts                            sos_alerts[]
+  subscription_upgrade_history          subscription_upgrade_history[]
+  subscriptions                         subscriptions[]
+  user_sessions                         user_sessions[]
+  cities                                cities                         @relation(fields: [cityId], references: [id])
+  users                                 users?                         @relation("usersTousers", fields: [referredById], references: [id])
+  other_users                           users[]                        @relation("usersTousers")
+  waitlist_entries                      waitlist_entries[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model waitlist_entries {
+  id        String   @id
+  userId    String
+  productId String
+  notified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  products  products @relation(fields: [productId], references: [id])
+  users     users    @relation(fields: [userId], references: [id])
+
+  @@unique([userId, productId])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model wellness_waitlist {
+  id        String   @id
+  name      String
+  email     String   @unique
+  city      String?
+  source    String   @default("wellness_page")
+  createdAt DateTime @default(now())
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  CITY_ADMIN
+  CARE_MANAGER
+  SUPPORT_AGENT
+  BILLING_EXECUTIVE
+  OPERATIONS_EXECUTIVE
+  CONTENT_ADMIN
+}
+
+enum BillingCycle {
+  QUARTERLY
+  BIANNUAL
+  YEARLY
+  MONTHLY
+}
+
+enum BookingStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  SLA_BREACH
+  CONFIRMED
+  PAYMENT_PENDING
+  PAYMENT_FAILED
+}
+
+enum CaregiverShift {
+  MORNING
+  AFTERNOON
+  EVENING
+  NIGHT
+  FLEXIBLE
+}
+
+enum CaregiverVerification {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum HealthTag {
+  NORMAL
+  DIABETIC
+  HYPERTENSION
+  CARDIAC
+  OTHER
+}
+
+enum InsuranceAppStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum LabBookingType {
+  HOME
+  DROP_OFF
+}
+
+enum LabStatus {
+  PENDING
+  HOLD_CREATED
+  PAYMENT_PENDING
+  CONFIRMED
+  SAMPLE_COLLECTED
+  PROCESSING
+  REPORT_GENERATED
+  FAILED
+  MANUAL_RECOVERY_NEEDED
+  RESCHEDULED
+}
+
+enum LegalDocStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum LegalDocType {
+  TERMS_AND_CONDITIONS
+  PRIVACY_POLICY
+  REFUND_POLICY
+  DISCLAIMER
+  SERVICE_POLICY
+  STATUTORY_DISCLOSURES
+}
+
+enum MedicalTourismStatus {
+  NEW
+  PAYMENT_PENDING
+  PAID
+  UNDER_REVIEW
+  CONTACTED
+  DOCUMENTS_REQUESTED
+  CONSULTATION_SCHEDULED
+  CLOSED
+}
+
+enum MeetupRegistrationStatus {
+  CONFIRMED
+  PENDING
+  ATTENDED
+  CANCELLED
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+  PUSH
+  SMS
+}
+
+enum PaymentMethod {
+  UPI
+  CARD
+  NETBANKING
+  WALLET
+  CASH
+}
+
+enum PaymentStatus {
+  INITIATED
+  SUCCESS
+  FAILED
+  REFUND_INITIATED
+  REFUNDED
+  PENDING
+}
+
+enum ReferralStatus {
+  PENDING
+  QUALIFIED
+  REWARDED
+  VOID
+}
+
+enum RefundType {
+  SLA_BREACH
+  COMPASSIONATE
+  CANCELLATION
+  OTHER
+}
+
+enum SOSStatus {
+  ACTIVE
+  RESPONDING
+  RESOLVED
+}
+
+enum ServiceType {
+  DOCTOR_HOME_VISIT
+  HOSPITAL_TRIP
+  HOME_NURSE
+  INSURANCE
+  BLOOD_TEST
+  MEDICINES
+  PHYSIO_FITNESS
+  EQUIPMENT_RENTAL
+  HOME_ESSENTIALS
+  CLUB_EVENTS
+  TIFFIN
+  TECH_HELPER
+  PAPERWORK_LEGAL
+  OTHER
+}
+
+enum ShiftDuration {
+  SHORT_VISIT
+  TWELVE_HOUR
+  TWENTY_FOUR_HOUR
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRING
+  EXPIRED
+  PAUSED
+  CANCELLED
+  PAYMENT_PENDING
+  UPGRADED
+  PENDING
+  DOWNGRADED
+  PAYMENT_FAILED
+  SCHEDULED_DOWNGRADE
+}
+
+enum UIConfigType {
+  HOME_BANNER
+  SERVICE_CARD
+  PROMO_SECTION
+  CATEGORY_STRIP
+  CUSTOM
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BLOCKED
+  DELETED
+}

@@ -1,0 +1,347 @@
+// ══════════════════════════════════════════════════════════════
+//  Ayuxa-owned schema. This is the ONLY schema `prisma migrate` /
+//  `prisma db push` is ever run against — every model here maps to
+//  an `ayuxa_`-prefixed (or explicitly Ayuxa-only) table, so those
+//  commands can never see, diff, or alter medico's tables.
+//
+//  For reading/writing medico's existing patient (User) and
+//  caregiver (Caregiver) data, see prisma/medico-readonly/schema.prisma
+//  — a SEPARATE, introspection-only schema/client. See README.md
+//  "Two-database-clients setup" before touching either schema.
+// ══════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/ayuxa-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Admin (Ayuxa HQ / Play Console / operations staff) ───────
+
+model AyuxaAdmin {
+  id           String              @id @default(uuid())
+  name         String
+  email        String              @unique
+  phone        String?
+  passwordHash String
+  role         AyuxaAdminRole      @default(SUPPORT_AGENT)
+  isActive     Boolean             @default(true)
+  lastLoginAt  DateTime?
+  refreshToken String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  auditLogs    AyuxaAuditLog[]
+  sessions     AyuxaAdminSession[]
+
+  @@map("ayuxa_admins")
+}
+
+model AyuxaAdminSession {
+  id           String     @id @default(uuid())
+  adminId      String
+  deviceType   String     @default("PC")
+  ipAddress    String?
+  isActive     Boolean    @default(true)
+  lastActiveAt DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+
+  admin        AyuxaAdmin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, isActive])
+  @@map("ayuxa_admin_sessions")
+}
+
+model AyuxaAuditLog {
+  id        String      @id @default(uuid())
+  adminId   String?
+  action    String
+  entity    String
+  entityId  String?
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime    @default(now())
+
+  admin     AyuxaAdmin? @relation(fields: [adminId], references: [id])
+
+  @@index([entity, entityId])
+  @@map("ayuxa_audit_logs")
+}
+
+// ─── Ayuxa Buddy — caregiver-side data layered on medico's Caregiver ───
+// caregiverId below = medico Caregiver.id (looked up by phone at OTP login,
+// via the read-only medico client — see services/medico.repository.js).
+
+model CaregiverProfile {
+  id                   String    @id @default(uuid())
+  caregiverId          String    @unique // medico Caregiver.id
+  phone                String    @unique // denormalized for OTP login lookup
+  acknowledgementId    String    @unique
+  employeeId           String?   @unique
+  photoUrl             String?
+  gender               String?
+  dob                  DateTime?
+  presentAddress       String    @default("")
+  permanentAddress     String    @default("")
+  emergencyNumber      String    @default("")
+  emailVerified        Boolean   @default(false)
+  preferredLanguage    String    @default("English")
+  jobRole              String?
+  aadhaarNumber        String    @default("")
+  panNumber            String    @default("")
+  aadhaarUploaded      Boolean   @default(false)
+  panUploaded          Boolean   @default(false)
+  otherDocsUploaded    Boolean   @default(false)
+  kycStatus            KycStatus @default(NOT_SUBMITTED)
+  pccUploaded          Boolean   @default(false)
+  agreementAccepted    Boolean   @default(false)
+  offerLetterGenerated Boolean   @default(false)
+  refreshToken         String?
+  fcmDeviceToken       String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  sessions             CaregiverSession[]
+  checkIns             CaregiverCheckIn[]
+  uploads              CaregiverUpload[]
+  notifications        CaregiverNotification[]
+
+  @@map("caregiver_profiles")
+}
+
+model CaregiverSession {
+  id           String           @id @default(uuid())
+  profileId    String
+  deviceType   String           @default("Mobile")
+  ipAddress    String?
+  isActive     Boolean          @default(true)
+  lastActiveAt DateTime         @default(now())
+  createdAt    DateTime         @default(now())
+
+  profile      CaregiverProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, isActive])
+  @@map("caregiver_sessions")
+}
+
+// One row per shift/booking check-in+out. bookingId = medico Booking.id when
+// the shift originates from a real medico booking; nullable so Buddy can
+// still function if an assignment hasn't been formalized into a Booking yet.
+model CaregiverCheckIn {
+  id                String           @id @default(uuid())
+  profileId         String
+  bookingId         String?
+  patientUserId     String?          // medico User.id
+  patientName       String
+  patientCode       String
+  address           String
+  mobile            String
+  caregiverRole     String
+  scopeOfWork       String
+  shiftStart        DateTime
+  shiftEnd          DateTime
+  checkedIn         Boolean          @default(false)
+  checkInTime       DateTime?
+  checkInSelfieUrl  String?
+  checkOutTime      DateTime?
+  checkOutSelfieUrl String?
+  vitalsBp          String?
+  vitalsPulse       String?
+  vitalsTemp        String?
+  careSummary       String?
+  checkoutComments  String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  profile           CaregiverProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  tasks             CheckInTask[]
+
+  @@index([profileId])
+  @@index([patientUserId])
+  @@map("caregiver_check_ins")
+}
+
+model CheckInTask {
+  id         String           @id @default(uuid())
+  checkInId  String
+  title      String
+  done       Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  checkIn    CaregiverCheckIn @relation(fields: [checkInId], references: [id], onDelete: Cascade)
+
+  @@map("check_in_tasks")
+}
+
+// Patient-document uploads performed by a caregiver from Ayuxa Buddy.
+// Denormalized rather than reusing medico's HealthReport so a Buddy
+// upload doesn't require write access into medico-owned tables.
+model CaregiverUpload {
+  id            String           @id @default(uuid())
+  profileId     String
+  patientUserId String?          // medico User.id
+  fileName      String
+  fileUrl       String?
+  category      String
+  patientCode   String
+  mobile        String
+  uploadedAt    DateTime         @default(now())
+  uploadedBy    String
+
+  profile       CaregiverProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([patientUserId])
+  @@map("caregiver_uploads")
+}
+
+model CaregiverNotification {
+  id         String           @id @default(uuid())
+  profileId  String
+  title      String
+  body       String
+  category   String
+  channels   String[]
+  read       Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+
+  profile    CaregiverProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, read])
+  @@map("caregiver_notifications")
+}
+
+// ─── Ayuxa Connect — family-login layered on medico's User (patient) ───
+// patientUserId below = medico User.id.
+
+model FamilyAccount {
+  id             String              @id @default(uuid())
+  phone          String              @unique
+  name           String              @default("")
+  email          String?
+  photoUrl       String?
+  refreshToken   String?
+  fcmDeviceToken String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  links          FamilyPatientLink[]
+  sessions       FamilyAccountSession[]
+
+  @@map("family_accounts")
+}
+
+model FamilyAccountSession {
+  id           String        @id @default(uuid())
+  accountId    String
+  deviceType   String        @default("Mobile")
+  ipAddress    String?
+  isActive     Boolean       @default(true)
+  lastActiveAt DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+
+  account      FamilyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, isActive])
+  @@map("family_account_sessions")
+}
+
+model FamilyPatientLink {
+  id            String        @id @default(uuid())
+  accountId     String
+  patientUserId String        // medico User.id
+  relation      String        @default("Family")
+  canEdit       Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+
+  account       FamilyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, patientUserId])
+  @@index([patientUserId])
+  @@map("family_patient_links")
+}
+
+// Care team roster shown to the patient/family for one patient.
+model CareTeamMember {
+  id            String   @id @default(uuid())
+  patientUserId String   // medico User.id
+  caregiverId   String?  // medico Caregiver.id, when this member is a real caregiver
+  name          String
+  role          String
+  phone         String?
+  photoUrl      String?
+  createdAt     DateTime @default(now())
+
+  @@index([patientUserId])
+  @@map("care_team_members")
+}
+
+// Service-visit history shown on the Connect side. Distinct from
+// CaregiverCheckIn so Connect's read model doesn't depend on Buddy's
+// internal shift bookkeeping shape.
+model ServiceVisit {
+  id            String    @id @default(uuid())
+  patientUserId String    // medico User.id
+  providerType  String
+  providerName  String
+  visitDate     DateTime
+  checkOutTime  DateTime?
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  @@index([patientUserId])
+  @@map("ayuxa_service_visits")
+}
+
+// ─── Shared ──────────────────────────────────
+
+model OtpLog {
+  id          String   @id @default(uuid())
+  phoneNumber String
+  code        String
+  isUsed      Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([phoneNumber, code])
+  @@map("ayuxa_otp_logs")
+}
+
+model MediaAsset {
+  id         String   @id @default(uuid())
+  fileName   String
+  fileUrl    String
+  fileType   String
+  fileSize   Int      @default(0)
+  folder     String   @default("general")
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+
+  @@map("ayuxa_media_assets")
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ENUMS
+// ══════════════════════════════════════════════════════════════
+
+enum AyuxaAdminRole {
+  SUPER_ADMIN
+  OPERATIONS_EXECUTIVE
+  SUPPORT_AGENT
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING_VERIFICATION
+  HQ_REVIEW
+  ACCEPTED
+  REJECTED
+}

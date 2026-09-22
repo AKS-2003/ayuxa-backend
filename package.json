@@ -1,0 +1,45 @@
+{
+  "name": "ayuxa-backend",
+  "version": "1.0.0",
+  "description": "Backend for Ayuxa Buddy (caregiver app) and Ayuxa Connect (patient & family app) — reuses medico's existing caregiver/patient data, owns its own Buddy/Connect-specific tables, exposes /api/buddy and /api/connect as a separate API surface from medico's own backend.",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "prisma:generate": "npx prisma generate --schema=prisma/schema.prisma",
+    "prisma:migrate": "npx prisma migrate dev --schema=prisma/schema.prisma",
+    "prisma:deploy": "npx prisma migrate deploy --schema=prisma/schema.prisma",
+    "prisma:studio": "npx prisma studio --schema=prisma/schema.prisma",
+    "prisma:seed": "node prisma/seed.js",
+    "medico:introspect": "npx prisma db pull --schema=prisma/medico-readonly/schema.prisma",
+    "medico:generate": "npx prisma generate --schema=prisma/medico-readonly/schema.prisma",
+    "postinstall": "npm run prisma:generate && npm run medico:generate"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/storage": "^7.19.0",
+    "@prisma/client": "^6.19.3",
+    "axios": "^1.20.0",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-validator": "^7.2.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^11.1.0",
+    "winston": "^3.17.0",
+    "zeptomail": "^5.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9",
+    "prisma": "^6.19.3"
+  }
+}
