@@ -99,8 +99,12 @@ model CaregiverProfile {
   aadhaarUploaded      Boolean   @default(false)
   panUploaded          Boolean   @default(false)
   otherDocsUploaded    Boolean   @default(false)
+  aadhaarDocUrl        String?
+  panDocUrl            String?
+  otherDocsUrl         String?
   kycStatus            KycStatus @default(NOT_SUBMITTED)
   pccUploaded          Boolean   @default(false)
+  pccDocUrl            String?
   agreementAccepted    Boolean   @default(false)
   offerLetterGenerated Boolean   @default(false)
   refreshToken         String?

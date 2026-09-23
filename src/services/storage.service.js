@@ -1,11 +1,10 @@
 // ──────────────────────────────────────────────
 //  Storage Service
-//  Provider-switchable like otp.service.js. STORAGE_PROVIDER=local
-//  (default) writes to ./uploads and serves it back via /uploads static
-//  route — good enough for dev. Set STORAGE_PROVIDER=gcs once Ayuxa has
-//  its own Google Cloud Storage bucket (see medico's
-//  backend/src/utils/storage.service.js for the signed-URL pattern this
-//  should mirror when that's wired up).
+//  Provider-switchable like otp.service.js. STORAGE_PROVIDER=gcs
+//  (default) uploads to medico's ayuxa-assets GCS bucket under an ayuxa/
+//  path prefix — see providers/gcs.service.js. STORAGE_PROVIDER=local
+//  writes to ./uploads and serves it back via the /uploads static route,
+//  useful only when no GCS credentials are configured for local dev.
 // ──────────────────────────────────────────────
 
 const path = require('path');

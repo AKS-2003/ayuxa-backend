@@ -35,8 +35,20 @@ const isEmergencyContactForUser = async (userId, phone) => {
     return !!match;
 };
 
-/** Look up a medico caregiver by phone — used for Buddy login. */
-const findCaregiverByPhone = (phone) => medico.caregivers.findUnique({ where: { phone } });
+/**
+ * Look up a medico caregiver by phone — used for Buddy login. Tries an
+ * exact match first (fast path), then falls back to a last-10-digit
+ * suffix match so +91/leading-zero/spacing differences between what the
+ * caregiver typed and how medico stored the number don't block login.
+ */
+const findCaregiverByPhone = async (phone) => {
+    const exact = await medico.caregivers.findUnique({ where: { phone } });
+    if (exact) return exact;
+
+    const last10 = String(phone || '').replace(/\D/g, '').slice(-10);
+    if (last10.length !== 10) return null;
+    return medico.caregivers.findFirst({ where: { phone: { endsWith: last10 } } });
+};
 
 /** Look up a medico caregiver by email — used for Buddy email-OTP login. */
 const findCaregiverByEmail = (email) => medico.caregivers.findFirst({ where: { email } });

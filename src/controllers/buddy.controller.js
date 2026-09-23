@@ -50,6 +50,7 @@ const updateMe = async (req, res, next) => {
             presentAddress, permanentAddress, emergencyNumber,
             aadhaarNumber, panNumber,
             aadhaarUploaded, panUploaded, otherDocsUploaded,
+            aadhaarDocUrl, panDocUrl, otherDocsUrl,
             preferredLanguage, jobRole,
         } = req.body;
 
@@ -71,6 +72,9 @@ const updateMe = async (req, res, next) => {
                 ...(aadhaarUploaded !== undefined && { aadhaarUploaded }),
                 ...(panUploaded !== undefined && { panUploaded }),
                 ...(otherDocsUploaded !== undefined && { otherDocsUploaded }),
+                ...(aadhaarDocUrl !== undefined && { aadhaarDocUrl }),
+                ...(panDocUrl !== undefined && { panDocUrl }),
+                ...(otherDocsUrl !== undefined && { otherDocsUrl }),
                 ...(preferredLanguage !== undefined && { preferredLanguage }),
                 ...(jobRole !== undefined && { jobRole }),
             },
@@ -99,9 +103,10 @@ const submitKyc = async (req, res, next) => {
 /** POST /api/buddy/me/pcc */
 const uploadPcc = async (req, res, next) => {
     try {
+        const { pccDocUrl } = req.body;
         const profile = await prisma.caregiverProfile.update({
             where: { id: req.caregiverProfile.id },
-            data: { pccUploaded: true },
+            data: { pccUploaded: true, ...(pccDocUrl !== undefined && { pccDocUrl }) },
         });
         await prisma.caregiverNotification.create({
             data: {

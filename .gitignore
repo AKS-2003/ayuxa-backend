@@ -4,3 +4,5 @@ node_modules/
 logs/
 uploads/
 !uploads/.gitkeep
+*firebase-adminsdk*.json
+*service-account*.json
