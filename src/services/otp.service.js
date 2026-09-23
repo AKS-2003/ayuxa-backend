@@ -17,8 +17,20 @@ const { generateOTP } = require('../utils/helpers');
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 
+// A single fixed identifier + code for app-store review builds, so a
+// reviewer can log in without receiving a real SMS/email. Scoped to one
+// exact identifier — every other number/email still goes through real
+// delivery and single-use verification. Unset DEMO_LOGIN_IDENTIFIER in
+// any environment to disable this entirely.
+const DEMO_IDENTIFIER = process.env.DEMO_LOGIN_IDENTIFIER || null;
+const DEMO_OTP = process.env.DEMO_LOGIN_OTP || null;
+
 function isEmail(identifier) {
     return identifier.includes('@');
+}
+
+function isDemoIdentifier(identifier) {
+    return !!DEMO_IDENTIFIER && !!DEMO_OTP && identifier === DEMO_IDENTIFIER;
 }
 
 async function deliverSMS(phoneNumber, otp) {
@@ -56,6 +68,11 @@ async function deliverEmail(email, otp) {
 }
 
 const requestOTP = async (identifier) => {
+    if (isDemoIdentifier(identifier)) {
+        logger.info(`[OTP][demo] request for ${identifier} — using fixed demo code, no delivery sent`);
+        return { success: true };
+    }
+
     const otp = generateOTP();
 
     const delivered = await (isEmail(identifier) ? deliverEmail(identifier, otp) : deliverSMS(identifier, otp))
@@ -80,6 +97,10 @@ const requestOTP = async (identifier) => {
 };
 
 const verifyOTP = async (identifier, code) => {
+    if (isDemoIdentifier(identifier)) {
+        return { success: code === DEMO_OTP };
+    }
+
     const otpRecord = await prisma.otpLog.findFirst({
         where: {
             phoneNumber: identifier,
