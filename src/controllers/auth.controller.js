@@ -356,6 +356,21 @@ const familyVerifyOTP = async (req, res, next) => {
                 create: { accountId: account.id, patientUserId: patient.id, relation: 'Emergency Contact' },
             });
             linkedPatient = { link, patient: { id: patient.id, name: patient.name, uniqueUserId: patient.uniqueUserId } };
+        } else if (mode === 'mobile') {
+            // "My Mobile" means the phone IS the patient's own registered
+            // number in medico — that's enough to identify them uniquely,
+            // no Ayuxa ID needed. Auto-link so the client gets the same
+            // immediate linkedPatient payload emergency mode returns,
+            // instead of having to call listLinkedPatients separately.
+            const patient = await medicoRepo.findUserByPhone(phoneNumber);
+            if (patient) {
+                const link = await prisma.familyPatientLink.upsert({
+                    where: { accountId_patientUserId: { accountId: account.id, patientUserId: patient.id } },
+                    update: {},
+                    create: { accountId: account.id, patientUserId: patient.id, relation: 'Self' },
+                });
+                linkedPatient = { link, patient: { id: patient.id, name: patient.name, uniqueUserId: patient.uniqueUserId } };
+            }
         }
 
         const session = await sessionService.recordFamilyAccountSession(account.id, req);
