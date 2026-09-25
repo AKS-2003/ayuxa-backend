@@ -13,7 +13,20 @@ const crypto = require('crypto');
 const medico = require('../config/medicoDatabase');
 
 /** Look up a medico patient (User) by phone — used for Connect family login lookups. */
-const findUserByPhone = (phone) => medico.users.findUnique({ where: { phone } });
+/**
+ * Look up a medico patient (User) by phone. Tries an exact match first,
+ * then falls back to a last-10-digit suffix match so +91/leading-zero/
+ * spacing differences between what was typed and how medico stored the
+ * number don't block lookups (same reasoning as findCaregiverByPhone).
+ */
+const findUserByPhone = async (phone) => {
+    const exact = await medico.users.findUnique({ where: { phone } });
+    if (exact) return exact;
+
+    const last10 = String(phone || '').replace(/\D/g, '').slice(-10);
+    if (last10.length !== 10) return null;
+    return medico.users.findFirst({ where: { phone: { endsWith: last10 } } });
+};
 
 /** Look up a medico patient (User) by id. */
 const findUserById = (id) => medico.users.findUnique({ where: { id } });
