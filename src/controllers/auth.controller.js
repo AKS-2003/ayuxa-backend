@@ -332,6 +332,21 @@ const familyVerifyOTP = async (req, res, next) => {
         const verification = await otpService.verifyOTP(phoneNumber, otp);
         if (!verification.success) return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
 
+        // "My Mobile" means this exact number must already be a patient's
+        // own registered number in medico — if it isn't, there's nothing
+        // to log into. Reject before creating/reusing a FamilyAccount so a
+        // random number can't end up with an empty, patient-less account.
+        let mobilePatient = null;
+        if (mode === 'mobile') {
+            mobilePatient = await medicoRepo.findUserByPhone(phoneNumber);
+            if (!mobilePatient) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No existing account found for this number. Please register first using the Ayuxa app.',
+                });
+            }
+        }
+
         let account = await prisma.familyAccount.findUnique({ where: { phone: phoneNumber } });
         const isNewAccount = !account;
         if (isNewAccount) {
@@ -357,20 +372,16 @@ const familyVerifyOTP = async (req, res, next) => {
             });
             linkedPatient = { link, patient: { id: patient.id, name: patient.name, uniqueUserId: patient.uniqueUserId } };
         } else if (mode === 'mobile') {
-            // "My Mobile" means the phone IS the patient's own registered
-            // number in medico — that's enough to identify them uniquely,
-            // no Ayuxa ID needed. Auto-link so the client gets the same
-            // immediate linkedPatient payload emergency mode returns,
-            // instead of having to call listLinkedPatients separately.
-            const patient = await medicoRepo.findUserByPhone(phoneNumber);
-            if (patient) {
-                const link = await prisma.familyPatientLink.upsert({
-                    where: { accountId_patientUserId: { accountId: account.id, patientUserId: patient.id } },
-                    update: {},
-                    create: { accountId: account.id, patientUserId: patient.id, relation: 'Self' },
-                });
-                linkedPatient = { link, patient: { id: patient.id, name: patient.name, uniqueUserId: patient.uniqueUserId } };
-            }
+            // mobilePatient is guaranteed non-null here — the guard above
+            // already rejected the request otherwise. Auto-link so the
+            // client gets the same immediate linkedPatient payload
+            // emergency mode returns, instead of a separate call.
+            const link = await prisma.familyPatientLink.upsert({
+                where: { accountId_patientUserId: { accountId: account.id, patientUserId: mobilePatient.id } },
+                update: {},
+                create: { accountId: account.id, patientUserId: mobilePatient.id, relation: 'Self' },
+            });
+            linkedPatient = { link, patient: { id: mobilePatient.id, name: mobilePatient.name, uniqueUserId: mobilePatient.uniqueUserId } };
         }
 
         const session = await sessionService.recordFamilyAccountSession(account.id, req);
