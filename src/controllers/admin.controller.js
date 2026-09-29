@@ -304,7 +304,7 @@ const getFamilyAccountDetail = async (req, res, next) => {
 
         const patients = await Promise.all(
             account.links.map(async (link) => {
-                const user = await medicoRepo.findUserById(link.patientUserId);
+                const user = await medicoRepo.findUserByIdIncludingDeleted(link.patientUserId);
                 return { link, patient: user ? sanitizeUser(user) : null };
             })
         );
@@ -337,7 +337,7 @@ const getPatientDetail = async (req, res, next) => {
     try {
         const { patientUserId } = req.params;
         const [user, careTeam, serviceVisits, uploads, links] = await Promise.all([
-            medicoRepo.findUserById(patientUserId),
+            medicoRepo.findUserByIdIncludingDeleted(patientUserId),
             prisma.careTeamMember.findMany({ where: { patientUserId } }),
             prisma.serviceVisit.findMany({ where: { patientUserId }, orderBy: { visitDate: 'desc' }, take: 20 }),
             prisma.connectUpload.findMany({ where: { patientUserId }, orderBy: { uploadedAt: 'desc' }, take: 20 }),

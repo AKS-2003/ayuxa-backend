@@ -12,31 +12,48 @@
 const crypto = require('crypto');
 const medico = require('../config/medicoDatabase');
 
-/** Look up a medico patient (User) by phone — used for Connect family login lookups. */
+// Deleting a medico User is a soft delete: status flips to 'DELETED' and
+// phone is mangled to `deleted_<uuid>_<original phone>` (to free up the
+// unique constraint for reuse) — the row itself is never removed. Every
+// patient-facing lookup below must exclude DELETED rows, or a phone
+// number recycled by a new signup can resolve back to the old deleted
+// account (either because the mangled phone still matches a last-10-digit
+// suffix search, or because id/uniqueUserId lookups never touch phone at
+// all and so never even see the mangling).
+
 /**
  * Look up a medico patient (User) by phone. Tries an exact match first,
  * then falls back to a last-10-digit suffix match so +91/leading-zero/
  * spacing differences between what was typed and how medico stored the
- * number don't block lookups (same reasoning as findCaregiverByPhone).
+ * number don't block lookups. Both branches exclude soft-deleted users.
  */
 const findUserByPhone = async (phone) => {
-    const exact = await medico.users.findUnique({ where: { phone } });
+    const exact = await medico.users.findFirst({ where: { phone, status: { not: 'DELETED' } } });
     if (exact) return exact;
 
     const last10 = String(phone || '').replace(/\D/g, '').slice(-10);
     if (last10.length !== 10) return null;
-    return medico.users.findFirst({ where: { phone: { endsWith: last10 } } });
+    return medico.users.findFirst({
+        where: { phone: { endsWith: last10 }, status: { not: 'DELETED' } },
+        orderBy: { createdAt: 'desc' },
+    });
 };
 
-/** Look up a medico patient (User) by id. */
-const findUserById = (id) => medico.users.findUnique({ where: { id } });
+/** Look up a medico patient (User) by id, excluding soft-deleted accounts. */
+const findUserById = (id) => medico.users.findFirst({ where: { id, status: { not: 'DELETED' } } });
+
+/** Same as findUserById but includes soft-deleted accounts — admin support views only. */
+const findUserByIdIncludingDeleted = (id) => medico.users.findUnique({ where: { id } });
 
 /**
  * Look up a medico patient (User) by their public "Ayuxa ID"
  * (medico's uniqueUserId, e.g. MED-BLR-00001) — used by Ayuxa Connect's
- * family-linking flows.
+ * family-linking flows. Excludes soft-deleted accounts — uniqueUserId
+ * isn't mangled on delete, so a deleted patient would otherwise still
+ * resolve here.
  */
-const findUserByUniqueUserId = (uniqueUserId) => medico.users.findUnique({ where: { uniqueUserId } });
+const findUserByUniqueUserId = (uniqueUserId) =>
+    medico.users.findFirst({ where: { uniqueUserId, status: { not: 'DELETED' } } });
 
 /**
  * True if `phone` is a registered emergency contact for the given patient
@@ -178,6 +195,7 @@ const updateEmergencyContact = async (userId, contactId, { name, phone }) => {
 module.exports = {
     findUserByPhone,
     findUserById,
+    findUserByIdIncludingDeleted,
     findUserByUniqueUserId,
     isEmergencyContactForUser,
     findCaregiverByPhone,
