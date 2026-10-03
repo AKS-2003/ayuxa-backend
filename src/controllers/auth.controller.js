@@ -337,7 +337,10 @@ const familyVerifyOTP = async (req, res, next) => {
         // to log into. Reject before creating/reusing a FamilyAccount so a
         // random number can't end up with an empty, patient-less account.
         let mobilePatient = null;
-        if (mode === 'mobile') {
+        // The app-store demo account is pre-linked to a test patient and isn't
+        // itself a medico patient, so it skips this check and the auto-link.
+        const isDemo = otpService.isDemoIdentifier(phoneNumber);
+        if (mode === 'mobile' && !isDemo) {
             mobilePatient = await medicoRepo.findUserByPhone(phoneNumber);
             if (!mobilePatient) {
                 return res.status(404).json({
@@ -371,7 +374,7 @@ const familyVerifyOTP = async (req, res, next) => {
                 create: { accountId: account.id, patientUserId: patient.id, relation: 'Emergency Contact' },
             });
             linkedPatient = { link, patient: { id: patient.id, name: patient.name, uniqueUserId: patient.uniqueUserId } };
-        } else if (mode === 'mobile') {
+        } else if (mode === 'mobile' && !isDemo) {
             // mobilePatient is guaranteed non-null here — the guard above
             // already rejected the request otherwise. Auto-link so the
             // client gets the same immediate linkedPatient payload

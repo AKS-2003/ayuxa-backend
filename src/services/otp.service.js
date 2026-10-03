@@ -121,4 +121,4 @@ const verifyOTP = async (identifier, code) => {
     return { success: true };
 };
 
-module.exports = { requestOTP, verifyOTP, isEmail };
+module.exports = { requestOTP, verifyOTP, isEmail, isDemoIdentifier };
