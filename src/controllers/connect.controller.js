@@ -210,6 +210,24 @@ const listSubscriptions = async (req, res, next) => {
     }
 };
 
+
+/** GET /api/connect/plans?planType=CARE|HOMEMAKER — same data as medico's plans-by-category */
+const listPlans = async (req, res, next) => {
+    try {
+        const planType = String(req.query.planType || 'CARE').toUpperCase();
+        if (!['CARE', 'HOMEMAKER'].includes(planType)) return res.status(400).json({ success: false, message: 'planType must be CARE or HOMEMAKER' });
+        res.json({ success: true, data: await medicoRepo.listPlansByType(planType) });
+    } catch (error) { next(error); }
+};
+
+/** GET /api/connect/patients/:patientUserId/memberships — current plan(s); available to every linked login mode, incl. emergency contacts */
+const getMemberships = async (req, res, next) => {
+    try {
+        if (!(await requireLink(req, res, req.params.patientUserId))) return;
+        res.json({ success: true, data: await medicoRepo.getMembershipsForUser(req.params.patientUserId) });
+    } catch (error) { next(error); }
+};
+
 /** GET /api/connect/patients/:patientUserId/payments */
 const listPayments = async (req, res, next) => {
     try {
@@ -331,7 +349,7 @@ const addCareTeamMember = async (req, res, next) => {
 module.exports = {
     getMe, updateMe, linkPatient, listLinkedPatients,
     listMedicalRecords, listServiceHistory, getCareTeam, updateEmergencyContact,
-    listSubscriptions, listPayments,
+    listSubscriptions, listPayments, listPlans, getMemberships,
     listUploads, addUpload,
     listNotifications, markAllNotificationsRead,
     deleteAccount,

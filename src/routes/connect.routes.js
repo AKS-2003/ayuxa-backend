@@ -18,6 +18,8 @@ router.get('/patients/:patientUserId/medical-records', authenticateFamilyAccount
 router.get('/patients/:patientUserId/service-history', authenticateFamilyAccount, ctrl.listServiceHistory);
 router.get('/patients/:patientUserId/care-team', authenticateFamilyAccount, ctrl.getCareTeam);
 router.put('/patients/:patientUserId/emergency-contact/:contactId', authenticateFamilyAccount, ctrl.updateEmergencyContact);
+router.get('/plans', authenticateFamilyAccount, ctrl.listPlans);
+router.get('/patients/:patientUserId/memberships', authenticateFamilyAccount, ctrl.getMemberships);
 router.get('/patients/:patientUserId/subscriptions', authenticateFamilyAccount, ctrl.listSubscriptions);
 router.get('/patients/:patientUserId/payments', authenticateFamilyAccount, ctrl.listPayments);
 router.get('/patients/:patientUserId/uploads', authenticateFamilyAccount, ctrl.listUploads);

@@ -106,6 +106,52 @@ const listSubscriptionsForUser = (userId) =>
         orderBy: { createdAt: 'desc' },
     });
 
+
+/** Visible plans of one planType (CARE | HOMEMAKER) with benefits + billing cycles, like medico's /plans/by-category (COMPANION inherits Lifeline benefits). */
+const listPlansByType = async (planType) => {
+    const include = { plan_benefits: { orderBy: { displayOrder: 'asc' } }, plan_billing_cycles: true };
+    const plans = await medico.plans.findMany({ where: { planType: planType.toUpperCase(), isVisible: true }, orderBy: { sortOrder: 'asc' }, include });
+    const isCompanion = (p) => (p.name || '').toUpperCase().includes('COMPANION') || p.metadata?.code === 'COMPANION';
+    const lifeline = plans.some(isCompanion)
+        ? await medico.plans.findFirst({ where: { OR: [{ name: { contains: 'Lifeline', mode: 'insensitive' } }, { name: { contains: 'Care Plan', mode: 'insensitive' } }] }, include })
+        : null;
+    return plans.map((p) => {
+        const inherited = isCompanion(p) && lifeline ? lifeline.plan_benefits.map((b) => ({ ...b, id: `inherited-${b.id}`, planId: p.id })) : [];
+        const { plan_benefits, plan_billing_cycles, ...rest } = p;
+        return { ...rest, planBenefits: [...inherited, ...plan_benefits], billingCycles: plan_billing_cycles };
+    });
+};
+
+/** A patient's memberships grouped by planType, like medico's /subscriptions/me/memberships. */
+const getMembershipsForUser = async (userId) => {
+    const include = { plans_subscriptions_planIdToplans: true, plans_subscriptions_scheduledPlanIdToplans: true };
+    const toItem = (sub, o = {}) => {
+        const plan = sub.plans_subscriptions_planIdToplans;
+        return {
+            id: sub.id, planId: sub.planId, planName: plan.name, planType: plan.planType,
+            maxConcurrent: plan.maxConcurrent, tierLevel: plan.tierLevel, status: sub.status,
+            billingCycle: sub.billingCycle, startDate: sub.startDate, expiryDate: sub.expiryDate,
+            daysRemaining: Math.max(0, Math.floor((new Date(sub.expiryDate) - new Date()) / 86400000)),
+            amount: sub.amount, autoRenew: sub.autoRenew,
+            scheduledDowngrade: sub.plans_subscriptions_scheduledPlanIdToplans
+                ? { planId: sub.scheduledPlanId, planName: sub.plans_subscriptions_scheduledPlanIdToplans.name, activatesOn: sub.scheduledChangeDate } : null,
+            ...o,
+        };
+    };
+    const live = await medico.subscriptions.findMany({
+        where: { userId, status: { in: ['ACTIVE', 'SCHEDULED_DOWNGRADE', 'EXPIRING'] }, expiryDate: { gte: new Date() } },
+        include, orderBy: { createdAt: 'desc' },
+    });
+    const grouped = {};
+    for (const sub of live) (grouped[sub.plans_subscriptions_planIdToplans.planType || 'CARE'] ||= []).push(toItem(sub));
+    for (const cat of ['CARE', 'HOMEMAKER']) {
+        if (grouped[cat]?.length) continue;
+        const last = await medico.subscriptions.findFirst({ where: { userId, plans_subscriptions_planIdToplans: { planType: cat } }, include, orderBy: { expiryDate: 'desc' } });
+        if (last) grouped[cat] = [toItem(last, { status: last.status === 'CANCELLED' ? 'CANCELLED' : 'EXPIRED', daysRemaining: 0, scheduledDowngrade: null })];
+    }
+    return { memberships: grouped, categories: Object.keys(grouped) };
+};
+
 /** A patient's payment history — read only, same reasoning as above. */
 const listPaymentsForUser = (userId) =>
     medico.payments.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
@@ -205,6 +251,8 @@ module.exports = {
     listEmergencyContactsForUser,
     listSubscriptionsForUser,
     listPaymentsForUser,
+    listPlansByType,
+    getMembershipsForUser,
     listBookingsForCaregiver,
     findBookingById,
     listEnabledCities,
