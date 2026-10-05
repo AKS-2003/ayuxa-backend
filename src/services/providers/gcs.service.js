@@ -63,4 +63,31 @@ const uploadFile = async (buffer, folder, originalName, mimeType) => {
     return toPublicUrl(storagePath);
 };
 
-module.exports = { uploadFile };
+/**
+ * Re-signs a stored file link so it opens now. medico stores 30-minute
+ * signed URLs for private files (health reports), which are dead by the time
+ * anyone taps them — this extracts the object path and issues a fresh
+ * read-only link. Links that aren't ours are returned unchanged.
+ */
+const getFreshReadUrl = async (storedUrl, minutes = 30) => {
+    if (!bucket || !storedUrl) return storedUrl;
+    let path;
+    try {
+        const u = new URL(storedUrl);
+        const prefix = `/${bucketName}/`;
+        if (u.hostname === 'storage.googleapis.com' && u.pathname.startsWith(prefix)) {
+            path = decodeURIComponent(u.pathname.slice(prefix.length));
+        } else if (CDN_URL && storedUrl.startsWith(CDN_URL.replace(/\/$/, '') + '/')) {
+            path = decodeURIComponent(u.pathname.slice(1));
+        }
+    } catch (_) {
+        return storedUrl;
+    }
+    if (!path) return storedUrl;
+    const [signed] = await bucket.file(path).getSignedUrl({
+        version: 'v4', action: 'read', expires: Date.now() + minutes * 60 * 1000,
+    });
+    return signed;
+};
+
+module.exports = { uploadFile, getFreshReadUrl };

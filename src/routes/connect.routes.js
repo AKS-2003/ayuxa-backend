@@ -22,6 +22,7 @@ router.get('/plans', authenticateFamilyAccount, ctrl.listPlans);
 router.get('/patients/:patientUserId/memberships', authenticateFamilyAccount, ctrl.getMemberships);
 router.get('/patients/:patientUserId/subscriptions', authenticateFamilyAccount, ctrl.listSubscriptions);
 router.get('/patients/:patientUserId/payments', authenticateFamilyAccount, ctrl.listPayments);
+router.post('/patients/:patientUserId/file-url', authenticateFamilyAccount, ctrl.getFileUrl);
 router.get('/patients/:patientUserId/uploads', authenticateFamilyAccount, ctrl.listUploads);
 router.post('/patients/:patientUserId/uploads', authenticateFamilyAccount, ctrl.addUpload);
 

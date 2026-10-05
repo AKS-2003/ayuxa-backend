@@ -245,10 +245,60 @@ const listPayments = async (req, res, next) => {
 const listUploads = async (req, res, next) => {
     try {
         if (!(await requireLink(req, res, req.params.patientUserId))) return;
+        const { patientUserId } = req.params;
 
-        const where = { patientUserId: req.params.patientUserId, ...(req.query.source && { source: req.query.source }) };
-        const uploads = await prisma.connectUpload.findMany({ where, orderBy: { uploadedAt: 'desc' } });
-        res.json({ success: true, data: uploads });
+        const patient = await medicoRepo.findUserById(patientUserId);
+        const [connectUploads, caregiverUploads] = await Promise.all([
+            prisma.connectUpload.findMany({ where: { patientUserId }, orderBy: { uploadedAt: 'desc' } }),
+            // Documents Ayuxa Buddy caregivers uploaded for this patient are the
+            // "Ayuxa Documents" tab — matched by id, or by the patient's Ayuxa ID.
+            prisma.caregiverUpload.findMany({
+                where: { OR: [{ patientUserId }, ...(patient ? [{ patientCode: patient.uniqueUserId }] : [])] },
+                orderBy: { uploadedAt: 'desc' },
+            }),
+        ]);
+
+        const merged = [
+            ...connectUploads,
+            ...caregiverUploads.map((u) => ({
+                id: u.id, patientUserId, fileName: u.fileName, fileUrl: u.fileUrl, category: u.category,
+                source: 'AYUXA', uploadedBy: u.uploadedBy, uploadedAt: u.uploadedAt,
+            })),
+        ].sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+
+        const source = req.query.source;
+        res.json({ success: true, data: source ? merged.filter((u) => u.source === source) : merged });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * POST /api/connect/patients/:patientUserId/file-url  { url }
+ * Returns a fresh, short-lived link for a file that belongs to this patient
+ * (a health report or an upload), so tapping a document opens it. Only links
+ * already stored against the patient are accepted — never an arbitrary URL.
+ */
+const getFileUrl = async (req, res, next) => {
+    try {
+        if (!(await requireLink(req, res, req.params.patientUserId))) return;
+        const { patientUserId } = req.params;
+        const { url } = req.body;
+        if (!url) return res.status(422).json({ success: false, message: 'url is required' });
+
+        const patient = await medicoRepo.findUserById(patientUserId);
+        const [reports, connectFile, caregiverFile] = await Promise.all([
+            medicoRepo.listHealthReportsForUser(patientUserId),
+            prisma.connectUpload.findFirst({ where: { patientUserId, fileUrl: url } }),
+            prisma.caregiverUpload.findFirst({
+                where: { fileUrl: url, OR: [{ patientUserId }, ...(patient ? [{ patientCode: patient.uniqueUserId }] : [])] },
+            }),
+        ]);
+        const owned = connectFile || caregiverFile || reports.some((r) => r.fileUrl === url);
+        if (!owned) return res.status(404).json({ success: false, message: 'File not found for this patient' });
+
+        const { getFreshReadUrl } = require('../services/providers/gcs.service');
+        res.json({ success: true, data: { url: await getFreshReadUrl(url) } });
     } catch (error) {
         next(error);
     }
@@ -350,7 +400,7 @@ module.exports = {
     getMe, updateMe, linkPatient, listLinkedPatients,
     listMedicalRecords, listServiceHistory, getCareTeam, updateEmergencyContact,
     listSubscriptions, listPayments, listPlans, getMemberships,
-    listUploads, addUpload,
+    listUploads, addUpload, getFileUrl,
     listNotifications, markAllNotificationsRead,
     deleteAccount,
     addCareTeamMember,

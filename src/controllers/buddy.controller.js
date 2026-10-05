@@ -247,7 +247,16 @@ const toggleTask = async (req, res, next) => {
 /** POST /api/buddy/me/uploads */
 const addUpload = async (req, res, next) => {
     try {
-        const { fileName, fileUrl, category, patientCode, mobile, patientUserId } = req.body;
+        const { fileName, fileUrl, category, patientCode, mobile } = req.body;
+        let { patientUserId } = req.body;
+
+        // Buddy only types the patient's Ayuxa ID — resolve it so the document
+        // shows up under "Ayuxa Documents" for that patient's family.
+        if (!patientUserId && patientCode) {
+            const patient = await medicoRepo.findUserByUniqueUserId(patientCode);
+            if (patient) patientUserId = patient.id;
+        }
+
         const upload = await prisma.caregiverUpload.create({
             data: {
                 profileId: req.caregiverProfile.id,
@@ -256,6 +265,19 @@ const addUpload = async (req, res, next) => {
                 uploadedBy: req.caregiver.name || 'Ayuxa Buddy',
             },
         });
+
+        if (patientUserId) {
+            const links = await prisma.familyPatientLink.findMany({ where: { patientUserId } });
+            await Promise.all(links.map((l) => prisma.connectNotification.create({
+                data: {
+                    accountId: l.accountId,
+                    title: 'New Document Added',
+                    body: `${category || 'A document'} was added to the care record by ${upload.uploadedBy}.`,
+                    category: 'documentUploaded',
+                },
+            })));
+        }
+
         res.status(201).json({ success: true, data: upload });
     } catch (error) {
         next(error);
