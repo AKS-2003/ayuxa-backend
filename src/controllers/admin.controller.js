@@ -219,6 +219,32 @@ const createAssignment = async (req, res, next) => {
             },
         });
 
+        // Assigning a caregiver also puts them on the patient's Care Team, so the
+        // family sees who is coming. Skipped if they're already on it.
+        const existingMember = await prisma.careTeamMember.findFirst({ where: { patientUserId: patient.id, caregiverId } });
+        if (!existingMember) {
+            const caregiver = await medicoRepo.findCaregiverById(caregiverId);
+            await prisma.careTeamMember.create({
+                data: {
+                    patientUserId: patient.id,
+                    caregiverId,
+                    name: caregiver?.name || 'Ayuxa Buddy',
+                    role: 'Ayuxa Buddy',
+                    phone: caregiver?.phone || profile.phone,
+                    photoUrl: profile.photoUrl || null,
+                },
+            });
+            const links = await prisma.familyPatientLink.findMany({ where: { patientUserId: patient.id } });
+            await Promise.all(links.map((link) => prisma.connectNotification.create({
+                data: {
+                    accountId: link.accountId,
+                    title: 'Caregiver Assigned',
+                    body: `${caregiver?.name || 'An Ayuxa Buddy caregiver'} has been assigned to ${patient.name || 'your family member'}.`,
+                    category: 'caregiverAssigned',
+                },
+            })));
+        }
+
         await createAuditLog({ adminId: req.user.id, action: 'ASSIGNMENT_CREATE', entity: 'CaregiverCheckIn', entityId: checkIn.id, ipAddress: req.ip });
 
         res.status(201).json({ success: true, data: checkIn });
@@ -237,6 +263,16 @@ const removeAssignment = async (req, res, next) => {
         }
 
         await prisma.caregiverCheckIn.delete({ where: { id: checkIn.id } });
+
+        // If that was the caregiver's last assignment for this patient, take them
+        // off the patient's Care Team too so the family doesn't see a stale name.
+        if (checkIn.patientUserId) {
+            const profile = await prisma.caregiverProfile.findUnique({ where: { id: checkIn.profileId } });
+            const remaining = await prisma.caregiverCheckIn.count({ where: { profileId: checkIn.profileId, patientUserId: checkIn.patientUserId } });
+            if (profile && remaining === 0) {
+                await prisma.careTeamMember.deleteMany({ where: { patientUserId: checkIn.patientUserId, caregiverId: profile.caregiverId } });
+            }
+        }
         await createAuditLog({ adminId: req.user.id, action: 'ASSIGNMENT_REMOVE', entity: 'CaregiverCheckIn', entityId: checkIn.id, ipAddress: req.ip });
 
         res.json({ success: true, message: 'Assignment removed' });
