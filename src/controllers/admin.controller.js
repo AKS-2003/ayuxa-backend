@@ -447,6 +447,22 @@ const listStaff = async (req, res, next) => {
 const setStaffActive = async (req, res, next) => {
     try {
         const { isActive } = req.body;
+
+        // Guard against locking everyone out: nobody can deactivate their own
+        // account, and the last active SUPER_ADMIN can never be deactivated.
+        if (isActive === false) {
+            if (req.params.id === req.user.id) {
+                return res.status(400).json({ success: false, message: 'You cannot deactivate your own account.' });
+            }
+            const target = await prisma.ayuxaAdmin.findUnique({ where: { id: req.params.id } });
+            if (target?.role === 'SUPER_ADMIN') {
+                const otherSupers = await prisma.ayuxaAdmin.count({ where: { role: 'SUPER_ADMIN', isActive: true, id: { not: target.id } } });
+                if (otherSupers === 0) {
+                    return res.status(400).json({ success: false, message: 'At least one active Super Admin is required.' });
+                }
+            }
+        }
+
         const admin = await prisma.ayuxaAdmin.update({ where: { id: req.params.id }, data: { isActive } });
         await createAuditLog({
             adminId: req.user.id,
