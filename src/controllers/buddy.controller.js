@@ -69,6 +69,10 @@ const updateMe = async (req, res, next) => {
         if (emergencyNumber !== undefined && emergencyNumber !== '' && !normalizeIndianMobile(emergencyNumber)) {
             return fail(422, 'Please enter a valid 10-digit emergency number.');
         }
+        const JOB_ROLES = ['Nurse', 'Caregiver', 'Attendant', 'Physiotherapist', 'Home Health Aide'];
+        if (jobRole !== undefined && !JOB_ROLES.includes(jobRole)) {
+            return fail(422, 'Please select a valid job role.');
+        }
         if (dob !== undefined && dob && !(new Date(dob) < new Date())) return fail(422, 'Date of birth must be in the past.');
 
         // An existing email can only be replaced after the new address is

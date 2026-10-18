@@ -84,6 +84,9 @@ const findCaregiverByPhone = async (phone) => {
 const findCaregiverByEmail = (email) => medico.caregivers.findFirst({ where: { email } });
 
 /** Look up a medico caregiver by id. */
+const findCaregiversByIds = (ids) =>
+    ids.length ? medico.caregivers.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true, phone: true } }) : [];
+
 const findCaregiverById = (id) => medico.caregivers.findUnique({ where: { id }, include: { cities: { select: { name: true } } } });
 
 /** A patient's medico-side health reports (for display alongside Ayuxa's own records). */
@@ -251,6 +254,7 @@ module.exports = {
     findCaregiverByPhone,
     findCaregiverByEmail,
     findCaregiverById,
+    findCaregiversByIds,
     listHealthReportsForUser,
     listEmergencyContactsForUser,
     listSubscriptionsForUser,
