@@ -80,9 +80,24 @@ const adminLogin = async (req, res, next) => {
 
 const adminRegister = async (req, res, next) => {
     try {
-        const { name, email, password, role, phone } = req.body;
+        const { name, email, password, role, phone, emailOtp } = req.body;
+        if (!['SUPER_ADMIN', 'OPERATIONS_EXECUTIVE', 'SUPPORT_AGENT'].includes(role)) {
+            return res.status(422).json({ success: false, message: 'Invalid role.' });
+        }
+        if (!/^[\p{L}][\p{L} .'-]{1,59}$/u.test(String(name).trim())) {
+            return res.status(422).json({ success: false, message: 'Please enter a valid name containing only letters.' });
+        }
+        if (!/(?=.*[A-Za-z])(?=.*\d)/.test(password)) {
+            return res.status(422).json({ success: false, message: 'Password must include a letter and a number.' });
+        }
+        // The new staff member's email must be proven with an OTP sent to that inbox.
+        const verification = await otpService.verifyOTP(String(email).trim().toLowerCase(), String(emailOtp));
+        if (!verification.success) return res.status(400).json({ success: false, message: 'Invalid or expired email OTP' });
+        if (await prisma.ayuxaAdmin.findUnique({ where: { email: String(email).trim().toLowerCase() } })) {
+            return res.status(409).json({ success: false, message: 'A staff member with this email already exists.' });
+        }
         const passwordHash = await hashPassword(password);
-        const admin = await prisma.ayuxaAdmin.create({ data: { name, email, passwordHash, role, phone } });
+        const admin = await prisma.ayuxaAdmin.create({ data: { name: String(name).trim(), email: String(email).trim().toLowerCase(), passwordHash, role, phone } });
 
         await createAuditLog({
             adminId: req.user.id, action: 'ADMIN_REGISTER', entity: 'AyuxaAdmin', entityId: admin.id,

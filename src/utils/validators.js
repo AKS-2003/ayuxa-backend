@@ -33,6 +33,22 @@ function normalizeIndianMobile(value) {
     return /^[6-9]\d{9}$/.test(last10) ? last10 : null;
 }
 
+/**
+ * True for obviously fake numbers: one repeated digit (9999999999), simple
+ * ascending/descending runs (1234567890, 9876543210) and short repeating
+ * patterns (9898989898).
+ */
+function isDummyMobile(value) {
+    const d = String(value || '').replace(/\D/g, '').slice(-10);
+    if (d.length !== 10) return false;
+    if (/^(\d)\1{9}$/.test(d)) return true;
+    if ('01234567890123456789'.includes(d) || '98765432109876543210'.includes(d)) return true;
+    return /^(\d{2})\1{4}$/.test(d) || /^(\d{3})\1{2}\d$/.test(d) || /^(\d{5})\1$/.test(d);
+}
+
+/** A real Indian mobile: +91 optional, 10 digits starting 6-9, not an obvious dummy. */
+const isRealIndianMobile = (value) => !!normalizeIndianMobile(value) && !isDummyMobile(value);
+
 const isValidEmail = (value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value || '').trim());
 
-module.exports = { isValidAadhaar, isValidPan, isValidName, normalizeIndianMobile, isValidEmail };
+module.exports = { isValidAadhaar, isValidPan, isValidName, normalizeIndianMobile, isValidEmail, isDummyMobile, isRealIndianMobile };

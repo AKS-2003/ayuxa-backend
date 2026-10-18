@@ -5,6 +5,8 @@ const ctrl = require('../controllers/auth.controller');
 const { validate } = require('../middleware/validate');
 const { authenticate, authenticateAdmin } = require('../middleware/auth');
 const { authorize } = require('../middleware/rbac');
+const otpService = require('../services/otp.service');
+const { isRealIndianMobile, isDummyMobile } = require('../utils/validators');
 
 const router = express.Router();
 
@@ -17,7 +19,17 @@ const otpLimiter = rateLimit({
     message: { success: false, message: 'Too many OTP requests. Please try again later.' },
 });
 
-const phoneValidator = body('phoneNumber').isMobilePhone('any').withMessage('Valid phone number required');
+// A real mobile number: +91 / 10 digits starting 6-9, never an obvious dummy such
+// as 1234567890 or 9999999999. The configured demo-login number is exempt.
+const phoneValidator = body('phoneNumber')
+    .custom((value) => {
+        const v = String(value || '').trim();
+        if (otpService.isDemoIdentifier(v)) return true;
+        if (isRealIndianMobile(v)) return true;
+        // Non-Indian numbers: must still look like a phone number and not be a dummy.
+        return v.startsWith('+') && !v.startsWith('+91') && require('validator').isMobilePhone(v, 'any') && !isDummyMobile(v);
+    })
+    .withMessage('Enter a valid mobile number (10 digits, e.g. 98765 43210)');
 const signupOtpValidator = [phoneValidator, body('otp').isLength({ min: 4, max: 4 }).withMessage('4-digit OTP required')];
 
 const emailValidator = body('email').isEmail().withMessage('Valid email is required');
@@ -35,7 +47,7 @@ const loginOtpValidator = [...loginTargetValidator, body('otp').isLength({ min: 
 router.post('/admin/login', [body('email').isEmail(), body('password').notEmpty()], validate, ctrl.adminLogin);
 router.post('/admin/register',
     authenticateAdmin, authorize('SUPER_ADMIN'),
-    [body('name').notEmpty(), body('email').isEmail(), body('password').isLength({ min: 8 }), body('role').notEmpty()], validate,
+    [body('name').notEmpty(), body('email').isEmail(), body('password').isLength({ min: 8 }), body('role').notEmpty(), body('emailOtp').isLength({ min: 4, max: 4 }).withMessage('Verify the staff email with the 4-digit OTP first')], validate,
     ctrl.adminRegister);
 router.post('/admin/refresh', ctrl.adminRefreshToken);
 

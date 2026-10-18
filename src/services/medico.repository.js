@@ -87,6 +87,24 @@ const findCaregiverByEmail = (email) => medico.caregivers.findFirst({ where: { e
 const findCaregiversByIds = (ids) =>
     ids.length ? medico.caregivers.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true, phone: true } }) : [];
 
+/** Ids of medico caregivers whose name, email or phone contains [term]. */
+const searchCaregiverIds = async (term) => {
+    const rows = await medico.caregivers.findMany({
+        where: { OR: [{ name: { contains: term, mode: 'insensitive' } }, { email: { contains: term, mode: 'insensitive' } }, { phone: { contains: term } }] },
+        select: { id: true },
+        take: 500,
+    });
+    return rows.map((r) => r.id);
+};
+
+/** One-line default address for a patient (used to pre-fill assignments), or null. */
+const getDefaultAddress = async (userId) => {
+    const a = await medico.addresses.findFirst({ where: { userId }, orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }] });
+    if (!a) return null;
+    const line = [a.line1 || a.addressLine1, a.line2 || a.addressLine2, a.landmark, a.cityName || a.city, a.state, a.pincode].filter(Boolean).join(', ');
+    return { text: line, latitude: a.latitude, longitude: a.longitude };
+};
+
 const findCaregiverById = (id) => medico.caregivers.findUnique({ where: { id }, include: { cities: { select: { name: true } } } });
 
 /** A patient's medico-side health reports (for display alongside Ayuxa's own records). */
@@ -255,6 +273,8 @@ module.exports = {
     findCaregiverByEmail,
     findCaregiverById,
     findCaregiversByIds,
+    searchCaregiverIds,
+    getDefaultAddress,
     listHealthReportsForUser,
     listEmergencyContactsForUser,
     listSubscriptionsForUser,

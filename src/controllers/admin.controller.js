@@ -70,33 +70,24 @@ const listCaregivers = async (req, res, next) => {
         const { page, limit, skip } = paginate(req.query);
         const { search, kycStatus } = req.query;
 
-        const profileWhere = kycStatus ? { kycStatus } : {};
-        const profiles = await prisma.caregiverProfile.findMany({
-            where: profileWhere,
-            skip, take: limit,
-            orderBy: { createdAt: 'desc' },
-        });
+        // Search runs against medico (name / email / phone) BEFORE paging, so results and totals are right.
+        const searchedIds = search ? await medicoRepo.searchCaregiverIds(search) : null;
+        const profileWhere = {
+            ...(kycStatus && { kycStatus }),
+            ...(searchedIds && { caregiverId: { in: searchedIds } }),
+        };
+        const [profiles, total] = await Promise.all([
+            prisma.caregiverProfile.findMany({ where: profileWhere, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+            prisma.caregiverProfile.count({ where: profileWhere }),
+        ]);
 
-        const caregiverIds = profiles.map((p) => p.caregiverId);
-        const caregivers = await Promise.all(caregiverIds.map((id) => medicoRepo.findCaregiverById(id)));
+        const caregivers = await Promise.all(profiles.map((p) => medicoRepo.findCaregiverById(p.caregiverId)));
         const caregiverById = new Map(caregivers.filter(Boolean).map((c) => [c.id, c]));
-
-        let merged = profiles.map((profile) => ({
+        const merged = profiles.map((profile) => ({
             profile: sanitizeProfile(profile),
             caregiver: caregiverById.get(profile.caregiverId) || null,
         }));
 
-        if (search) {
-            const q = search.toLowerCase();
-            merged = merged.filter(({ caregiver }) =>
-                caregiver && (
-                    caregiver.name?.toLowerCase().includes(q) ||
-                    caregiver.phone?.includes(q) ||
-                    caregiver.email?.toLowerCase().includes(q)
-                ));
-        }
-
-        const total = kycStatus ? await prisma.caregiverProfile.count({ where: profileWhere }) : await prisma.caregiverProfile.count();
         sendPaginatedResponse(res, merged, total, page, limit);
     } catch (error) {
         next(error);
@@ -192,13 +183,23 @@ const createAssignment = async (req, res, next) => {
         const patient = await medicoRepo.findUserById(patientUserId);
         if (!patient) return res.status(404).json({ success: false, message: 'Patient not found' });
 
+        // Never leave the address blank or made-up: use what the admin typed, else the patient's saved address.
+        let assignmentAddress = String(address || '').trim();
+        if (!assignmentAddress) assignmentAddress = (await medicoRepo.getDefaultAddress(patient.id).catch(() => null))?.text || '';
+        if (!assignmentAddress) {
+            return res.status(422).json({ success: false, message: 'This patient has no saved address — please enter the visit address.' });
+        }
+        if (new Date(shiftEnd) <= new Date(shiftStart)) {
+            return res.status(422).json({ success: false, message: 'Shift end must be after shift start.' });
+        }
+
         const checkIn = await prisma.caregiverCheckIn.create({
             data: {
                 profileId: profile.id,
                 patientUserId: patient.id,
                 patientName: patient.name || '',
                 patientCode: patient.uniqueUserId || '',
-                address: address || '',
+                address: assignmentAddress,
                 mobile: patient.phone || '',
                 caregiverRole: caregiverRole || profile.jobRole || '',
                 scopeOfWork: scopeOfWork || '',
