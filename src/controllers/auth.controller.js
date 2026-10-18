@@ -14,7 +14,7 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../config/database');
 const { createAuditLog } = require('../middleware/audit');
 const {
-    generateAccessToken, generateRefreshToken,
+    generateAccessToken, generateRefreshToken, APP_SESSION_EXPIRY,
     hashPassword, comparePassword,
     generateAcknowledgementId,
 } = require('../utils/helpers');
@@ -183,7 +183,7 @@ const caregiverVerifyOTP = async (req, res, next) => {
         const session = await sessionService.recordCaregiverSession(profile.id, req);
         const payload = { id: caregiver.id, type: 'caregiver', sessionId: session?.id };
         const accessToken = generateAccessToken(payload);
-        const refreshToken = generateRefreshToken(payload);
+        const refreshToken = generateRefreshToken(payload, APP_SESSION_EXPIRY);
 
         await prisma.caregiverProfile.update({ where: { id: profile.id }, data: { refreshToken } });
         setAuthCookies(res, accessToken, refreshToken);
@@ -244,7 +244,7 @@ const caregiverSignupVerifyOTP = async (req, res, next) => {
         const session = await sessionService.recordCaregiverSession(profile.id, req);
         const payload = { id: caregiver.id, type: 'caregiver', sessionId: session?.id };
         const accessToken = generateAccessToken(payload);
-        const refreshToken = generateRefreshToken(payload);
+        const refreshToken = generateRefreshToken(payload, APP_SESSION_EXPIRY);
 
         await prisma.caregiverProfile.update({ where: { id: profile.id }, data: { refreshToken } });
         setAuthCookies(res, accessToken, refreshToken);
@@ -405,7 +405,7 @@ const familyVerifyOTP = async (req, res, next) => {
         const session = await sessionService.recordFamilyAccountSession(account.id, req);
         const payload = { id: account.id, type: 'familyAccount', sessionId: session?.id };
         const accessToken = generateAccessToken(payload);
-        const refreshToken = generateRefreshToken(payload);
+        const refreshToken = generateRefreshToken(payload, APP_SESSION_EXPIRY);
 
         await prisma.familyAccount.update({ where: { id: account.id }, data: { refreshToken } });
         setAuthCookies(res, accessToken, refreshToken);

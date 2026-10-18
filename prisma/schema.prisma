@@ -385,3 +385,15 @@ enum KycStatus {
   ACCEPTED
   REJECTED
 }
+
+// Ayuxa-only settings for a medico emergency_contacts row (see migration 0007).
+model EmergencyContactPref {
+  id            String   @id @default(uuid())
+  patientUserId String
+  contactId     String   @unique // medico emergency_contacts.id
+  smsAlerts     Boolean  @default(false)
+  updatedAt     DateTime @updatedAt
+
+  @@index([patientUserId])
+  @@map("ayuxa_emergency_contact_prefs")
+}

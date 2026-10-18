@@ -9,6 +9,9 @@
 
 const prisma = require('../config/database');
 const medicoRepo = require('../services/medico.repository');
+const otpService = require('../services/otp.service');
+const billing = require('../services/medicoBilling.service');
+const { isValidName, isValidEmail, normalizeIndianMobile, isRealIndianMobile } = require('../utils/validators');
 
 /** Throws-as-response guard: is this family account linked to this patient? */
 async function requireLink(req, res, patientUserId) {
@@ -61,21 +64,46 @@ const getMe = async (req, res, next) => {
     }
 };
 
-/** PUT /api/connect/me */
+/** POST /api/connect/me/email/request-otp { email } — sends a code to a new email so it can be verified before it is saved */
+const requestEmailOtp = async (req, res, next) => {
+    try {
+        const email = String(req.body.email || '').trim().toLowerCase();
+        if (!isValidEmail(email)) return res.status(422).json({ success: false, message: 'Please enter a valid email address.' });
+        const result = await otpService.requestOTP(email);
+        if (!result.success) return res.status(502).json({ success: false, message: 'Failed to send the verification code. Please try again.' });
+        res.json({ success: true, message: 'Verification code sent' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** PUT /api/connect/me — name, photo, and email (a changed email needs the OTP sent to it) */
 const updateMe = async (req, res, next) => {
     try {
-        const { name, email, photoUrl } = req.body;
-        if (name !== undefined && !/^[\p{L}][\p{L} .'-]{1,59}$/u.test(String(name).trim())) {
-            return res.status(422).json({ success: false, message: 'Please enter a valid name containing only letters.' });
+        const { name, email, photoUrl, emailOtp } = req.body;
+        const fail = (status, message, code) => res.status(status).json({ success: false, message, ...(code && { code }) });
+
+        if (name !== undefined && !isValidName(name)) return fail(422, 'Please enter a valid name containing only letters.');
+
+        let nextEmail;
+        if (email !== undefined) {
+            nextEmail = String(email || '').trim().toLowerCase();
+            if (nextEmail && !isValidEmail(nextEmail)) return fail(422, 'Please enter a valid email address (it must contain @ and a domain).');
+            const current = String(req.familyAccount.email || '').trim().toLowerCase();
+            if (nextEmail === current) {
+                nextEmail = undefined;
+            } else if (nextEmail) {
+                if (!emailOtp) return fail(403, 'Verify the new email with the code sent to it before saving.', 'EMAIL_VERIFICATION_REQUIRED');
+                const verification = await otpService.verifyOTP(nextEmail, String(emailOtp));
+                if (!verification.success) return fail(400, 'Invalid or expired verification code.');
+            }
         }
-        if (email !== undefined && email !== null && email !== '' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email).trim())) {
-            return res.status(422).json({ success: false, message: 'Please enter a valid email address.' });
-        }
+
         const account = await prisma.familyAccount.update({
             where: { id: req.familyAccount.id },
             data: {
                 ...(name !== undefined && { name: String(name).trim() }),
-                ...(email !== undefined && { email: email ? String(email).trim() : null }),
+                ...(nextEmail !== undefined && { email: nextEmail || null }),
                 ...(photoUrl !== undefined && { photoUrl }),
             },
         });
@@ -130,7 +158,7 @@ const listLinkedPatients = async (req, res, next) => {
                 prisma.serviceVisit.findMany({ where: { patientUserId: link.patientUserId }, orderBy: { visitDate: 'desc' } }),
             ]);
             if (!user) return null;
-            return { relation: link.relation, canEdit: link.canEdit, patient: sanitizePatient(user), healthReports, emergencyContacts, careTeam, serviceVisits };
+            return { relation: link.relation, canEdit: link.canEdit, patient: sanitizePatient(user), healthReports, emergencyContacts: await withContactPrefs(emergencyContacts), careTeam, serviceVisits };
         }));
 
         res.json({ success: true, data: patients.filter(Boolean) });
@@ -177,29 +205,213 @@ const getCareTeam = async (req, res, next) => {
     }
 };
 
-/**
- * PUT /api/connect/patients/:patientUserId/emergency-contact/:contactId —
- * emergency_contact_card.dart's edit action.
- */
+const CONTACT_RELATIONSHIPS = ['Spouse', 'Son', 'Daughter', 'Parent', 'Sibling', 'Relative', 'Friend', 'Neighbour', 'Other'];
+const MAX_EMERGENCY_CONTACTS = 5;
+
+/** Adds each contact's Ayuxa-side preferences (SMS alerts opt-in). */
+async function withContactPrefs(contacts) {
+    if (!contacts.length) return [];
+    const prefs = await prisma.emergencyContactPref.findMany({ where: { contactId: { in: contacts.map((c) => c.id) } } });
+    const byId = new Map(prefs.map((p) => [p.contactId, p]));
+    return contacts.map((c) => ({ ...c, smsAlerts: byId.get(c.id)?.smsAlerts ?? false }));
+}
+
+const setSmsPref = (patientUserId, contactId, smsAlerts) =>
+    prisma.emergencyContactPref.upsert({
+        where: { contactId },
+        update: { smsAlerts: !!smsAlerts },
+        create: { patientUserId, contactId, smsAlerts: !!smsAlerts },
+    });
+
+/** Validates name / phone / relationship; returns { error } or { value }. */
+function validateContact({ name, phone, relationship }, { partial = false } = {}) {
+    const value = {};
+    if (!partial || name !== undefined) {
+        if (!isValidName(name)) return { error: 'Please enter a valid contact name containing only letters.' };
+        value.name = String(name).trim();
+    }
+    if (!partial || phone !== undefined) {
+        if (!normalizeIndianMobile(phone)) return { error: 'Enter a valid 10-digit mobile number (it must start with 6, 7, 8 or 9).' };
+        if (!isRealIndianMobile(phone)) return { error: 'That looks like a dummy number. Please enter the contact\'s real mobile number.' };
+        value.phone = normalizeIndianMobile(phone);
+    }
+    if (!partial || relationship !== undefined) {
+        const rel = String(relationship || 'Other').trim();
+        if (!CONTACT_RELATIONSHIPS.includes(rel)) return { error: 'Please choose a valid relationship.' };
+        value.relationship = rel;
+    }
+    return { value };
+}
+
+const last10 = (n) => String(n || '').replace(/\D/g, '').slice(-10);
+
+/** POST /api/connect/patients/:patientUserId/emergency-contacts — adds a contact (what "Add emergency contact" calls) */
+const addEmergencyContact = async (req, res, next) => {
+    try {
+        const link = await requireLink(req, res, req.params.patientUserId);
+        if (!link) return;
+        if (!link.canEdit) return res.status(403).json({ success: false, message: 'This link is view-only' });
+
+        const { error, value } = validateContact(req.body);
+        if (error) return res.status(422).json({ success: false, message: error });
+
+        const existing = await medicoRepo.listEmergencyContactsForUser(req.params.patientUserId);
+        if (existing.length >= MAX_EMERGENCY_CONTACTS) {
+            return res.status(409).json({ success: false, message: `You can add up to ${MAX_EMERGENCY_CONTACTS} emergency contacts.` });
+        }
+        if (existing.some((c) => last10(c.phone) === value.phone)) {
+            return res.status(409).json({ success: false, message: 'That number is already an emergency contact.' });
+        }
+
+        const created = await medicoRepo.createEmergencyContact(req.params.patientUserId, value);
+        await setSmsPref(req.params.patientUserId, created.id, req.body.smsAlerts);
+
+        await notifyAccount(req.familyAccount.id, {
+            title: 'Emergency Contact Added',
+            body: `${value.name} was added as an emergency contact.`,
+            category: 'recordUpdated',
+        });
+        res.status(201).json({ success: true, data: (await withContactPrefs([created]))[0] });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** PUT /api/connect/patients/:patientUserId/emergency-contact/:contactId — edit name, number, relationship, SMS opt-in */
 const updateEmergencyContact = async (req, res, next) => {
     try {
         const link = await requireLink(req, res, req.params.patientUserId);
         if (!link) return;
         if (!link.canEdit) return res.status(403).json({ success: false, message: 'This link is view-only' });
 
-        const { name, phone } = req.body;
-        const updated = await medicoRepo.updateEmergencyContact(req.params.patientUserId, req.params.contactId, { name, phone });
+        const { error, value } = validateContact(req.body, { partial: true });
+        if (error) return res.status(422).json({ success: false, message: error });
+
+        if (value.phone) {
+            const others = (await medicoRepo.listEmergencyContactsForUser(req.params.patientUserId)).filter((c) => c.id !== req.params.contactId);
+            if (others.some((c) => last10(c.phone) === value.phone)) {
+                return res.status(409).json({ success: false, message: 'That number is already an emergency contact.' });
+            }
+        }
+
+        const updated = await medicoRepo.updateEmergencyContact(req.params.patientUserId, req.params.contactId, value);
         if (!updated) return res.status(404).json({ success: false, message: 'Emergency contact not found' });
+        if (req.body.smsAlerts !== undefined) await setSmsPref(req.params.patientUserId, updated.id, req.body.smsAlerts);
 
         await notifyAccount(req.familyAccount.id, {
             title: 'Emergency Contact Updated',
-            body: `Emergency contact details were updated.`,
+            body: 'Emergency contact details were updated.',
             category: 'recordUpdated',
         });
-
-        res.json({ success: true, data: updated });
+        res.json({ success: true, data: (await withContactPrefs([updated]))[0] });
     } catch (error) {
         next(error);
+    }
+};
+
+/** DELETE /api/connect/patients/:patientUserId/emergency-contact/:contactId */
+const deleteEmergencyContact = async (req, res, next) => {
+    try {
+        const link = await requireLink(req, res, req.params.patientUserId);
+        if (!link) return;
+        if (!link.canEdit) return res.status(403).json({ success: false, message: 'This link is view-only' });
+
+        const removed = await medicoRepo.deleteEmergencyContact(req.params.patientUserId, req.params.contactId);
+        if (!removed) return res.status(404).json({ success: false, message: 'Emergency contact not found' });
+        await prisma.emergencyContactPref.deleteMany({ where: { contactId: req.params.contactId } });
+        res.json({ success: true, message: 'Emergency contact removed' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** GET /api/connect/support — support contact details shown on the Contact Support screen */
+const getSupport = (req, res) => {
+    const phone = String(process.env.SUPPORT_PHONE || '08047280789').replace(/\D/g, '');
+    const whatsapp = String(process.env.SUPPORT_WHATSAPP || '919480198108').replace(/\D/g, '');
+    res.json({
+        success: true,
+        data: {
+            phone,
+            phoneDisplay: process.env.SUPPORT_PHONE_DISPLAY || '080 4728 0789',
+            whatsapp,
+            email: process.env.SUPPORT_EMAIL || 'support@ayuxacare.com',
+            hours: process.env.SUPPORT_HOURS || '',
+        },
+    });
+};
+
+// ─── Plan checkout (Razorpay, via medico's billing) ───
+
+const CYCLE_PRICE = { QUARTERLY: 'quarterlyPrice', BIANNUAL: 'biannualPrice', YEARLY: 'yearlyPrice' };
+
+function sendBillingError(res, error, next) {
+    if (error instanceof billing.BillingError) return res.status(error.status).json({ success: false, message: error.message });
+    return next(error);
+}
+
+/** Resolves the link and checks this account may pay for the patient. */
+async function requirePayerLink(req, res) {
+    const link = await requireLink(req, res, req.params.patientUserId);
+    if (!link) return null;
+    if (!link.canEdit) {
+        res.status(403).json({ success: false, message: 'This link is view-only, so it cannot buy or change plans.' });
+        return null;
+    }
+    return link;
+}
+
+/**
+ * POST /api/connect/patients/:patientUserId/checkout/start { planId, billingCycle }
+ * The price is read from the plan here — the app's number is never trusted.
+ */
+const startCheckout = async (req, res, next) => {
+    try {
+        if (!(await requirePayerLink(req, res))) return;
+        const { planId, billingCycle } = req.body;
+        if (!CYCLE_PRICE[billingCycle]) return res.status(422).json({ success: false, message: 'Choose a billing period.' });
+
+        const plan = await medicoRepo.findPlanById(planId);
+        if (!plan) return res.status(404).json({ success: false, message: 'That plan is no longer available.' });
+        const amount = plan[CYCLE_PRICE[billingCycle]];
+        if (!(amount > 0)) return res.status(422).json({ success: false, message: 'This plan is priced on demand — please contact support to subscribe.' });
+
+        const order = await billing.startSubscription(req.params.patientUserId, { planId, billingCycle, amount });
+        res.json({ success: true, data: { ...order, planName: plan.name } });
+    } catch (error) {
+        sendBillingError(res, error, next);
+    }
+};
+
+/** POST /api/connect/patients/:patientUserId/checkout/verify { razorpayOrderId, razorpayPaymentId, razorpaySignature } */
+const verifyCheckout = async (req, res, next) => {
+    try {
+        if (!(await requirePayerLink(req, res))) return;
+        const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+        if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+            return res.status(422).json({ success: false, message: 'Payment details are incomplete.' });
+        }
+        const result = await billing.verifyPayment(req.params.patientUserId, { razorpayOrderId, razorpayPaymentId, razorpaySignature });
+
+        await notifyAccount(req.familyAccount.id, {
+            title: 'Payment Successful',
+            body: 'Your plan payment was received. Your membership is being activated.',
+            category: 'recordUpdated',
+        });
+        res.json({ success: true, message: result.message || 'Payment verified', data: result.data });
+    } catch (error) {
+        sendBillingError(res, error, next);
+    }
+};
+
+/** POST /api/connect/patients/:patientUserId/checkout/cancel { orderId } — checkout dismissed or failed */
+const cancelCheckout = async (req, res, next) => {
+    try {
+        if (!(await requirePayerLink(req, res))) return;
+        if (req.body.orderId) await billing.cancelPayment(req.params.patientUserId, req.body.orderId).catch(() => {});
+        res.json({ success: true });
+    } catch (error) {
+        sendBillingError(res, error, next);
     }
 };
 
@@ -472,8 +684,10 @@ const addCareTeamMember = async (req, res, next) => {
 };
 
 module.exports = {
-    getMe, updateMe, linkPatient, listLinkedPatients,
-    listMedicalRecords, listServiceHistory, getCareTeam, updateEmergencyContact,
+    getMe, updateMe, requestEmailOtp, linkPatient, listLinkedPatients,
+    listMedicalRecords, listServiceHistory, getCareTeam,
+    addEmergencyContact, updateEmergencyContact, deleteEmergencyContact, getSupport,
+    startCheckout, verifyCheckout, cancelCheckout,
     listSubscriptions, listPayments, listPlans, getMemberships,
     listUploads, addUpload, updateUpload, deleteUpload, getFileUrl,
     listNotifications, markAllNotificationsRead, markNotificationRead, setDeviceToken,

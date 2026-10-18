@@ -13,11 +13,15 @@ const generateAccessToken = (payload) => {
     });
 };
 
-const generateRefreshToken = (payload) => {
+const generateRefreshToken = (payload, expiresIn) => {
     return jwt.sign(payload, process.env.JWT_SECRET, {
-        expiresIn: process.env.JWT_REFRESH_EXPIRY || '7d',
+        expiresIn: expiresIn || process.env.JWT_REFRESH_EXPIRY || '7d',
     });
 };
+
+// The mobile apps keep people signed in for a long time (OTP only again after
+// this long, on logout, or on a new device) — admins keep the stricter default.
+const APP_SESSION_EXPIRY = process.env.JWT_APP_REFRESH_EXPIRY || '90d';
 
 // ─── Password Hashing ──────────────────────
 
@@ -72,6 +76,7 @@ const sendPaginatedResponse = (res, data, total, page, limit) => {
 module.exports = {
     generateAccessToken,
     generateRefreshToken,
+    APP_SESSION_EXPIRY,
     hashPassword,
     comparePassword,
     generateAcknowledgementId,

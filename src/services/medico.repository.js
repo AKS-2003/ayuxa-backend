@@ -61,8 +61,11 @@ const findUserByUniqueUserId = (uniqueUserId) =>
  * Connect's "Emergency Contact" login mode.
  */
 const isEmergencyContactForUser = async (userId, phone) => {
-    const match = await medico.emergency_contacts.findFirst({ where: { userId, phone } });
-    return !!match;
+    // Compare the last 10 digits so +91 / spacing differences between how the
+    // contact was saved and how they type it at login don't lock them out.
+    const last10 = (n) => String(n || '').replace(/\D/g, '').slice(-10);
+    const contacts = await medico.emergency_contacts.findMany({ where: { userId } });
+    return contacts.some((c) => last10(c.phone) === last10(phone));
 };
 
 /**
@@ -129,6 +132,9 @@ const listSubscriptionsForUser = (userId) =>
 
 
 /** Visible plans of one planType (CARE | HOMEMAKER) with benefits + billing cycles, like medico's /plans/by-category (COMPANION inherits Lifeline benefits). */
+/** A visible plan by id (used to price a checkout server-side). */
+const findPlanById = (id) => medico.plans.findFirst({ where: { id, isVisible: true } });
+
 const listPlansByType = async (planType) => {
     const include = { plan_benefits: { orderBy: { displayOrder: 'asc' } }, plan_billing_cycles: true };
     const plans = await medico.plans.findMany({ where: { planType: planType.toUpperCase(), isVisible: true }, orderBy: { sortOrder: 'asc' }, include });
@@ -249,7 +255,7 @@ const updateCaregiverProfile = (id, { name, email, specialization }) =>
  * since it's what stops a family account from editing a contact on a
  * patient it isn't linked to.
  */
-const updateEmergencyContact = async (userId, contactId, { name, phone }) => {
+const updateEmergencyContact = async (userId, contactId, { name, phone, relationship }) => {
     const existing = await medico.emergency_contacts.findUnique({ where: { id: contactId } });
     if (!existing || existing.userId !== userId) return null;
 
@@ -258,9 +264,27 @@ const updateEmergencyContact = async (userId, contactId, { name, phone }) => {
         data: {
             ...(name !== undefined && { name }),
             ...(phone !== undefined && { phone }),
+            ...(relationship !== undefined && { relationship }),
             updatedAt: new Date(),
         },
     });
+};
+
+/**
+ * Adds an emergency contact exactly the way medico's own app does
+ * (user.controller.js addEmergencyContact): one row in emergency_contacts.
+ */
+const createEmergencyContact = (userId, { name, phone, relationship }) =>
+    medico.emergency_contacts.create({
+        data: { id: require('crypto').randomUUID(), userId, name, phone, relationship, updatedAt: new Date() },
+    });
+
+/** Removes a contact, but only if it belongs to [userId]. */
+const deleteEmergencyContact = async (userId, contactId) => {
+    const existing = await medico.emergency_contacts.findUnique({ where: { id: contactId } });
+    if (!existing || existing.userId !== userId) return false;
+    await medico.emergency_contacts.delete({ where: { id: contactId } });
+    return true;
 };
 
 module.exports = {
@@ -280,6 +304,7 @@ module.exports = {
     listSubscriptionsForUser,
     listPaymentsForUser,
     listPlansByType,
+    findPlanById,
     getMembershipsForUser,
     listBookingsForCaregiver,
     findBookingById,
@@ -289,4 +314,6 @@ module.exports = {
     createCaregiver,
     updateCaregiverProfile,
     updateEmergencyContact,
+    createEmergencyContact,
+    deleteEmergencyContact,
 };
