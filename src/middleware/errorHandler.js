@@ -26,9 +26,9 @@ const errorHandler = (err, req, res, next) => {
         message = 'Record not found';
     }
 
-    if (err.name === 'JsonWebTokenError') {
+    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError' || err.name === 'NotBeforeError') {
         statusCode = 401;
-        message = 'Invalid token';
+        message = err.name === 'TokenExpiredError' ? 'Session expired' : 'Invalid token';
     }
 
     if (err.array && typeof err.array === 'function') {
