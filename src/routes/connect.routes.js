@@ -12,7 +12,9 @@ router.delete('/me', authenticateFamilyAccount, ctrl.deleteAccount);
 router.post('/me/patients', authenticateFamilyAccount, ctrl.linkPatient);
 router.get('/me/patients', authenticateFamilyAccount, ctrl.listLinkedPatients);
 router.get('/me/notifications', authenticateFamilyAccount, ctrl.listNotifications);
+router.put('/me/device-token', authenticateFamilyAccount, ctrl.setDeviceToken);
 router.put('/me/notifications/read-all', authenticateFamilyAccount, ctrl.markAllNotificationsRead);
+router.put('/me/notifications/:notificationId/read', authenticateFamilyAccount, ctrl.markNotificationRead);
 
 router.get('/patients/:patientUserId/medical-records', authenticateFamilyAccount, ctrl.listMedicalRecords);
 router.get('/patients/:patientUserId/service-history', authenticateFamilyAccount, ctrl.listServiceHistory);
@@ -25,6 +27,8 @@ router.get('/patients/:patientUserId/payments', authenticateFamilyAccount, ctrl.
 router.post('/patients/:patientUserId/file-url', authenticateFamilyAccount, ctrl.getFileUrl);
 router.get('/patients/:patientUserId/uploads', authenticateFamilyAccount, ctrl.listUploads);
 router.post('/patients/:patientUserId/uploads', authenticateFamilyAccount, ctrl.addUpload);
+router.put('/patients/:patientUserId/uploads/:uploadId', authenticateFamilyAccount, ctrl.updateUpload);
+router.delete('/patients/:patientUserId/uploads/:uploadId', authenticateFamilyAccount, ctrl.deleteUpload);
 
 // ─── Admin management ────────────────────────
 router.post('/care-team', authenticateAdmin, authorize('SUPER_ADMIN', 'OPERATIONS_EXECUTIVE'), ctrl.addCareTeamMember);

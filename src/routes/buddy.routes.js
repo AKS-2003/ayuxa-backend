@@ -16,7 +16,9 @@ router.post('/me/check-ins/:id/check-in', authenticateCaregiver, ctrl.checkIn);
 router.post('/me/check-ins/:id/check-out', authenticateCaregiver, ctrl.checkOut);
 router.put('/me/check-ins/:checkInId/tasks/:taskId', authenticateCaregiver, ctrl.toggleTask);
 router.post('/me/uploads', authenticateCaregiver, ctrl.addUpload);
+router.put('/me/device-token', authenticateCaregiver, ctrl.setDeviceToken);
 router.put('/me/notifications/read-all', authenticateCaregiver, ctrl.markAllNotificationsRead);
+router.put('/me/notifications/:notificationId/read', authenticateCaregiver, ctrl.markNotificationRead);
 
 // ─── Admin management ────────────────────────
 router.put('/profiles/:caregiverId/kyc', authenticateAdmin, authorize('SUPER_ADMIN', 'OPERATIONS_EXECUTIVE'), ctrl.setKycStatus);

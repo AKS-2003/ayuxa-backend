@@ -171,19 +171,23 @@ const listEnabledCities = () =>
     medico.cities.findMany({ where: { isEnabled: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true } });
 
 /** Paginated/searchable medico patients (Users) — admin panel's Connect patient lookup. */
-const listUsers = ({ skip, take, search }) => {
-    const where = search
-        ? { OR: [{ name: { contains: search, mode: 'insensitive' } }, { phone: { contains: search } }, { uniqueUserId: { contains: search, mode: 'insensitive' } }] }
-        : {};
-    return medico.users.findMany({ where, skip, take, orderBy: { createdAt: 'desc' } });
-};
+// Soft-deleted patients (status 'DELETED') are excluded: they can't be
+// assigned or linked, so listing them only leads to "account not found" errors.
+const userSearchWhere = (search) => ({
+    status: { not: 'DELETED' },
+    ...(search && {
+        OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { phone: { contains: search } },
+            { uniqueUserId: { contains: search, mode: 'insensitive' } },
+        ],
+    }),
+});
 
-const countUsers = (search) => {
-    const where = search
-        ? { OR: [{ name: { contains: search, mode: 'insensitive' } }, { phone: { contains: search } }, { uniqueUserId: { contains: search, mode: 'insensitive' } }] }
-        : {};
-    return medico.users.count({ where });
-};
+const listUsers = ({ skip, take, search }) =>
+    medico.users.findMany({ where: userSearchWhere(search), skip, take, orderBy: { createdAt: 'desc' } });
+
+const countUsers = (search) => medico.users.count({ where: userSearchWhere(search) });
 
 /**
  * The one sanctioned write into medico's schema: creates a brand-new

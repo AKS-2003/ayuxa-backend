@@ -65,11 +65,17 @@ const getMe = async (req, res, next) => {
 const updateMe = async (req, res, next) => {
     try {
         const { name, email, photoUrl } = req.body;
+        if (name !== undefined && !/^[\p{L}][\p{L} .'-]{1,59}$/u.test(String(name).trim())) {
+            return res.status(422).json({ success: false, message: 'Please enter a valid name containing only letters.' });
+        }
+        if (email !== undefined && email !== null && email !== '' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email).trim())) {
+            return res.status(422).json({ success: false, message: 'Please enter a valid email address.' });
+        }
         const account = await prisma.familyAccount.update({
             where: { id: req.familyAccount.id },
             data: {
-                ...(name !== undefined && { name }),
-                ...(email !== undefined && { email }),
+                ...(name !== undefined && { name: String(name).trim() }),
+                ...(email !== undefined && { email: email ? String(email).trim() : null }),
                 ...(photoUrl !== undefined && { photoUrl }),
             },
         });
@@ -333,6 +339,48 @@ const addUpload = async (req, res, next) => {
     }
 };
 
+/**
+ * PUT /api/connect/patients/:patientUserId/uploads/:uploadId — rename,
+ * re-categorise or replace the file of a document the family uploaded.
+ * Documents uploaded by Ayuxa staff (source AYUXA) are read-only here.
+ */
+const updateUpload = async (req, res, next) => {
+    try {
+        if (!(await requireLink(req, res, req.params.patientUserId))) return;
+        const existing = await prisma.connectUpload.findFirst({
+            where: { id: req.params.uploadId, patientUserId: req.params.patientUserId, source: 'FAMILY' },
+        });
+        if (!existing) return res.status(404).json({ success: false, message: 'Document not found' });
+
+        const { fileName, fileUrl, category } = req.body;
+        const upload = await prisma.connectUpload.update({
+            where: { id: existing.id },
+            data: {
+                ...(fileName !== undefined && { fileName }),
+                ...(fileUrl !== undefined && { fileUrl }),
+                ...(category !== undefined && { category }),
+            },
+        });
+        res.json({ success: true, data: upload });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** DELETE /api/connect/patients/:patientUserId/uploads/:uploadId — remove a family-uploaded document */
+const deleteUpload = async (req, res, next) => {
+    try {
+        if (!(await requireLink(req, res, req.params.patientUserId))) return;
+        const result = await prisma.connectUpload.deleteMany({
+            where: { id: req.params.uploadId, patientUserId: req.params.patientUserId, source: 'FAMILY' },
+        });
+        if (result.count === 0) return res.status(404).json({ success: false, message: 'Document not found' });
+        res.json({ success: true, message: 'Document removed' });
+    } catch (error) {
+        next(error);
+    }
+};
+
 // ─── Notifications ────────────────────────────
 
 /** GET /api/connect/me/notifications */
@@ -343,6 +391,33 @@ const listNotifications = async (req, res, next) => {
             orderBy: { createdAt: 'desc' },
         });
         res.json({ success: true, data: notifications });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** PUT /api/connect/me/device-token  { token } — registers this device for push; null clears it (logout) */
+const setDeviceToken = async (req, res, next) => {
+    try {
+        const token = req.body.token ? String(req.body.token) : null;
+        // A phone shared by two family accounts must only push to the one signed in now.
+        if (token) await prisma.familyAccount.updateMany({ where: { fcmDeviceToken: token, NOT: { id: req.familyAccount.id } }, data: { fcmDeviceToken: null } });
+        await prisma.familyAccount.update({ where: { id: req.familyAccount.id }, data: { fcmDeviceToken: token } });
+        res.json({ success: true });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** PUT /api/connect/me/notifications/:notificationId/read */
+const markNotificationRead = async (req, res, next) => {
+    try {
+        const result = await prisma.connectNotification.updateMany({
+            where: { id: req.params.notificationId, accountId: req.familyAccount.id },
+            data: { read: true },
+        });
+        if (result.count === 0) return res.status(404).json({ success: false, message: 'Notification not found' });
+        res.json({ success: true });
     } catch (error) {
         next(error);
     }
@@ -400,8 +475,8 @@ module.exports = {
     getMe, updateMe, linkPatient, listLinkedPatients,
     listMedicalRecords, listServiceHistory, getCareTeam, updateEmergencyContact,
     listSubscriptions, listPayments, listPlans, getMemberships,
-    listUploads, addUpload, getFileUrl,
-    listNotifications, markAllNotificationsRead,
+    listUploads, addUpload, updateUpload, deleteUpload, getFileUrl,
+    listNotifications, markAllNotificationsRead, markNotificationRead, setDeviceToken,
     deleteAccount,
     addCareTeamMember,
 };

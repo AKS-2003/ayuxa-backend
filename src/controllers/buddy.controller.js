@@ -8,6 +8,8 @@
 const prisma = require('../config/database');
 const medicoRepo = require('../services/medico.repository');
 const { generateEmployeeId } = require('../utils/helpers');
+const otpService = require('../services/otp.service');
+const { isValidAadhaar, isValidPan, isValidName, isValidEmail, normalizeIndianMobile } = require('../utils/validators');
 
 /** Strips the session refresh token (and FCM device token) before exposing a CaregiverProfile to its own client. */
 function sanitizeProfile(profile) {
@@ -45,7 +47,7 @@ const getMe = async (req, res, next) => {
 const updateMe = async (req, res, next) => {
     try {
         const {
-            name, email,
+            name, email, emailOtp,
             gender, dob, photoUrl,
             presentAddress, permanentAddress, emergencyNumber,
             aadhaarNumber, panNumber,
@@ -54,13 +56,48 @@ const updateMe = async (req, res, next) => {
             preferredLanguage, jobRole,
         } = req.body;
 
-        if (name !== undefined || email !== undefined) {
-            await medicoRepo.updateCaregiverProfile(req.caregiver.id, { name, email });
+        const fail = (status, message, code) => res.status(status).json({ success: false, message, ...(code && { code }) });
+
+        // Identity-field validation — never trust the client.
+        if (name !== undefined && !isValidName(name)) return fail(422, 'Please enter a valid name containing only letters.');
+        if (aadhaarNumber !== undefined && aadhaarNumber !== '' && !isValidAadhaar(aadhaarNumber)) {
+            return fail(422, 'Please enter a valid 12-digit Aadhaar number.');
+        }
+        if (panNumber !== undefined && panNumber !== '' && !isValidPan(panNumber)) {
+            return fail(422, 'Please enter a valid 10-character PAN (e.g. ABCDE1234F).');
+        }
+        if (emergencyNumber !== undefined && emergencyNumber !== '' && !normalizeIndianMobile(emergencyNumber)) {
+            return fail(422, 'Please enter a valid 10-digit emergency number.');
+        }
+        if (dob !== undefined && dob && !(new Date(dob) < new Date())) return fail(422, 'Date of birth must be in the past.');
+
+        // An existing email can only be replaced after the new address is
+        // proven with an OTP; otherwise anyone with a session could repoint
+        // the caregiver's admin-visible contact record at an unverified inbox.
+        let nextEmail;
+        let emailNowVerified = false;
+        if (email !== undefined) {
+            nextEmail = String(email || '').trim().toLowerCase();
+            const current = String(req.caregiver.email || '').trim().toLowerCase();
+            if (nextEmail && !isValidEmail(nextEmail)) return fail(422, 'Please enter a valid email address.');
+            if (nextEmail === current) {
+                nextEmail = undefined;
+            } else if (current) {
+                if (!emailOtp) return fail(403, 'Verify the new email with the OTP sent to it before saving.', 'EMAIL_VERIFICATION_REQUIRED');
+                const verification = await otpService.verifyOTP(nextEmail, String(emailOtp));
+                if (!verification.success) return fail(400, 'Invalid or expired OTP');
+                emailNowVerified = true;
+            }
+        }
+
+        if (name !== undefined || nextEmail !== undefined) {
+            await medicoRepo.updateCaregiverProfile(req.caregiver.id, { name, email: nextEmail });
         }
 
         const profile = await prisma.caregiverProfile.update({
             where: { id: req.caregiverProfile.id },
             data: {
+                ...(nextEmail !== undefined && { emailVerified: emailNowVerified }),
                 ...(gender !== undefined && { gender }),
                 ...(dob !== undefined && { dob: dob ? new Date(dob) : null }),
                 ...(photoUrl !== undefined && { photoUrl }),
@@ -68,7 +105,7 @@ const updateMe = async (req, res, next) => {
                 ...(permanentAddress !== undefined && { permanentAddress }),
                 ...(emergencyNumber !== undefined && { emergencyNumber }),
                 ...(aadhaarNumber !== undefined && { aadhaarNumber }),
-                ...(panNumber !== undefined && { panNumber }),
+                ...(panNumber !== undefined && { panNumber: String(panNumber).trim().toUpperCase() }),
                 ...(aadhaarUploaded !== undefined && { aadhaarUploaded }),
                 ...(panUploaded !== undefined && { panUploaded }),
                 ...(otherDocsUploaded !== undefined && { otherDocsUploaded }),
@@ -250,18 +287,29 @@ const addUpload = async (req, res, next) => {
         const { fileName, fileUrl, category, patientCode, mobile } = req.body;
         let { patientUserId } = req.body;
 
-        // Buddy only types the patient's Ayuxa ID — resolve it so the document
-        // shows up under "Ayuxa Documents" for that patient's family.
-        if (!patientUserId && patientCode) {
-            const patient = await medicoRepo.findUserByUniqueUserId(patientCode);
-            if (patient) patientUserId = patient.id;
+        // The Patient ID must belong to an active patient, and the mobile must
+        // be that patient's number — no free-text uploads against made-up IDs.
+        const mobile10 = normalizeIndianMobile(mobile);
+        if (!patientCode || !String(patientCode).trim()) {
+            return res.status(422).json({ success: false, message: 'Patient ID is required.' });
         }
+        if (!mobile10) {
+            return res.status(422).json({ success: false, message: 'Enter a valid 10-digit patient mobile number.' });
+        }
+        const patient = await medicoRepo.findUserByUniqueUserId(String(patientCode).trim());
+        if (!patient) {
+            return res.status(404).json({ success: false, message: 'No active patient found with that Patient ID.' });
+        }
+        if (normalizeIndianMobile(patient.phone) !== mobile10) {
+            return res.status(422).json({ success: false, message: "That mobile number doesn't match this patient's records." });
+        }
+        patientUserId = patient.id;
 
         const upload = await prisma.caregiverUpload.create({
             data: {
                 profileId: req.caregiverProfile.id,
                 patientUserId: patientUserId || null,
-                fileName, fileUrl, category, patientCode, mobile,
+                fileName, fileUrl, category, patientCode: patient.uniqueUserId, mobile: mobile10,
                 uploadedBy: req.caregiver.name || 'Ayuxa Buddy',
             },
         });
@@ -279,6 +327,32 @@ const addUpload = async (req, res, next) => {
         }
 
         res.status(201).json({ success: true, data: upload });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** PUT /api/buddy/me/device-token  { token } — registers this device for push; null clears it (logout) */
+const setDeviceToken = async (req, res, next) => {
+    try {
+        const token = req.body.token ? String(req.body.token) : null;
+        if (token) await prisma.caregiverProfile.updateMany({ where: { fcmDeviceToken: token, NOT: { id: req.caregiverProfile.id } }, data: { fcmDeviceToken: null } });
+        await prisma.caregiverProfile.update({ where: { id: req.caregiverProfile.id }, data: { fcmDeviceToken: token } });
+        res.json({ success: true });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** PUT /api/buddy/me/notifications/:notificationId/read */
+const markNotificationRead = async (req, res, next) => {
+    try {
+        const result = await prisma.caregiverNotification.updateMany({
+            where: { id: req.params.notificationId, profileId: req.caregiverProfile.id },
+            data: { read: true },
+        });
+        if (result.count === 0) return res.status(404).json({ success: false, message: 'Notification not found' });
+        res.json({ success: true });
     } catch (error) {
         next(error);
     }
@@ -306,6 +380,11 @@ const setKycStatus = async (req, res, next) => {
         const profile = await prisma.caregiverProfile.findUnique({ where: { caregiverId: req.params.caregiverId } });
         if (!profile) return res.status(404).json({ success: false, message: 'Caregiver profile not found' });
 
+        // A decision already made can't be repeated (guards double-clicks and concurrent admins).
+        if (profile.kycStatus === status) {
+            return res.status(409).json({ success: false, message: `KYC is already ${status.toLowerCase()}.` });
+        }
+
         const data = { kycStatus: status };
         if (status === 'ACCEPTED' && !profile.employeeId) data.employeeId = generateEmployeeId();
 
@@ -318,6 +397,6 @@ const setKycStatus = async (req, res, next) => {
 
 module.exports = {
     getMe, updateMe, submitKyc, uploadPcc, acceptAgreement,
-    createCheckInRecord, checkIn, checkOut, toggleTask, addUpload, markAllNotificationsRead,
+    createCheckInRecord, checkIn, checkOut, toggleTask, addUpload, markAllNotificationsRead, markNotificationRead, setDeviceToken,
     setKycStatus,
 };
